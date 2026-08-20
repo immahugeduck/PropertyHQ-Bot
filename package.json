@@ -1,0 +1,15 @@
+{
+  "name": "maintenance-triage-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "test": "node --test",
+    "check": "node --check api/agentphone/webhook.js && node --check src/triage.js"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "vercel": "^46.0.0"
+  }
+}
