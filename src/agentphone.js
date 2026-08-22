@@ -1,25 +1,32 @@
 import crypto from 'node:crypto';
 
-export function verifyAgentPhoneSignature(rawBody, signature, secret) {
-  if (!secret || !signature || !rawBody) return false;
+export function verifyAgentPhoneSignature(rawBody, signature, timestamp, secret, now = Date.now()) {
+  if (!secret || !signature || !timestamp || !rawBody) return false;
 
-  // AgentPhone documents HMAC-signed webhooks. Accept the common raw hex form
-  // and an optional sha256= prefix while keeping comparison timing-safe.
-  const supplied = String(signature).trim().replace(/^sha256=/i, '');
-  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const timestampText = String(timestamp).trim();
+  if (!/^\d+$/.test(timestampText)) return false;
+  const timestampSeconds = Number(timestampText);
+  if (!Number.isSafeInteger(timestampSeconds) || Math.abs(now - timestampSeconds * 1000) > 5 * 60 * 1000) return false;
 
-  if (!/^[a-f0-9]+$/i.test(supplied) || supplied.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(supplied, 'hex'), Buffer.from(expected, 'hex'));
+  const signedBody = Buffer.concat([Buffer.from(`${timestampText}.`, 'utf8'), Buffer.from(rawBody)]);
+  const expected = `sha256=${crypto.createHmac('sha256', secret).update(signedBody).digest('hex')}`;
+  const supplied = String(signature).trim();
+
+  if (supplied.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(supplied, 'utf8'), Buffer.from(expected, 'utf8'));
 }
 
 export function normalizeAgentPhoneEvent(payload) {
   const data = payload?.data ?? {};
-  const message = data.message ?? payload?.message ?? '';
+  const message = data.message ?? data.transcript ?? payload?.message ?? '';
 
   return {
     event: payload?.event ?? payload?.type ?? 'unknown',
     channel: payload?.channel ?? data.channel ?? 'unknown',
     conversationId: payload?.conversationId ?? data.conversationId ?? null,
+    numberId: data.numberId ?? payload?.numberId ?? null,
+    agentId: payload?.agentId ?? data.agentId ?? null,
+    direction: data.direction ?? payload?.direction ?? null,
     from: data.fromNumber ?? data.from ?? payload?.from ?? null,
     to: data.toNumber ?? data.to ?? payload?.to ?? null,
     message: typeof message === 'string' ? message.trim() : '',

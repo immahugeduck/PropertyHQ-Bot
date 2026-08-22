@@ -8,10 +8,10 @@ Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webh
 
 1. AgentPhone receives SMS/iMessage or a voice transcript.
 2. AgentPhone sends a signed `agent.message` event to `/api/agentphone/webhook`.
-3. The backend verifies `X-Webhook-Signature` before processing the event.
+3. The backend verifies `X-Webhook-Signature` against `X-Webhook-Timestamp` and the exact raw body before processing the event.
 4. The event is normalized into a provider-independent shape.
 5. Deterministic safety rules run before any future AI classifier.
-6. A tenant-facing response and triage state are returned.
+6. For voice, a tenant-facing spoken response and triage state are returned. SMS/MMS/iMessage replies will be sent through the outbound Messages API after durable idempotency is implemented.
 7. A privacy-conscious audit event is logged without the message body or phone number.
 
 ## Severity contract
@@ -24,6 +24,7 @@ Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webh
 ## Security boundaries
 
 - Reject unsigned/invalid webhook requests.
+- Reject deliveries outside AgentPhone's five-minute replay window.
 - Never commit AgentPhone/OpenAI/database secrets.
 - Avoid logging message bodies and phone numbers by default.
 - Do not let an LLM downgrade a deterministic emergency match in future phases.
@@ -32,6 +33,7 @@ Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webh
 ## Phase 1 limitations
 
 - Tenant/property identity is not yet persisted.
+- Webhook IDs are not yet persisted for retry idempotency; complete this before creating real work orders or sending notifications.
 - Escalation notifications are not yet dispatched.
 - No work-order system integration exists yet.
 - AI classification is intentionally not enabled yet.

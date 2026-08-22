@@ -4,7 +4,7 @@ Production-shaped Phase 1 backend for receiving AgentPhone webhook events and tr
 
 Phase 1 establishes:
 - AgentPhone webhook endpoint
-- HMAC webhook verification
+- timestamp-bound HMAC webhook verification
 - normalized inbound message parsing
 - deterministic safety-first maintenance triage
 - emergency escalation guidance
@@ -17,6 +17,8 @@ Phase 1 establishes:
 Tenant -> AgentPhone -> `/api/agentphone/webhook` -> signature verification -> triage engine -> structured response
 
 The initial triage engine is intentionally deterministic. AI-assisted classification can be layered on later, but safety-critical categories are not delegated to an LLM alone.
+
+Voice calls receive an immediate spoken triage response through the webhook. SMS/MMS/iMessage are classified and logged but are not yet replied to: safe production replies need the outbound Messages API plus durable webhook idempotency, so a retry cannot send duplicate texts.
 
 ## Local setup
 
@@ -38,6 +40,8 @@ Configure the project or agent webhook to:
 `https://YOUR_DEPLOYMENT/api/agentphone/webhook`
 
 Set AgentPhone to include recent conversation context. Keep the webhook secret only in deployment environment variables.
+
+AgentPhone signs `timestamp.raw_body`; the endpoint rejects missing, malformed, or older-than-five-minute deliveries. Before production, add a persistent idempotency store keyed by `X-Webhook-ID` so a provider retry cannot create a duplicate work order or send duplicate messages.
 
 ## Safety model
 

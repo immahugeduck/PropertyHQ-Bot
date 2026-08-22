@@ -2,38 +2,57 @@ const RULES = [
   {
     severity: 'EMERGENCY',
     category: 'gas_or_co',
-    patterns: [/smell(s|ed)? (like )?gas/i, /gas leak/i, /carbon monoxide/i, /\bco alarm\b/i],
+    patterns: [
+      /smell(s|ed)? (like )?(natural )?(gas|propane)/i,
+      /\b(gas|propane) (smell|odor|odour)\b/i,
+      /\b(gas|propane) leak\b/i,
+      /\bcarbon[ -]?monoxide\b/i,
+      /\bco (alarm|detector)\b/i
+    ],
     response: 'This may be an immediate safety hazard. Leave the affected area without operating switches or creating sparks. From a safe location, contact 911 or the gas utility/emergency service as appropriate. Do not wait for maintenance if you believe there is a gas leak or carbon monoxide danger.'
   },
   {
     severity: 'EMERGENCY',
     category: 'fire_smoke',
-    patterns: [/\bfire\b/i, /flames?/i, /heavy smoke/i, /smoke (coming|pouring)/i],
+    patterns: [/\bfire\b/i, /\bflames?\b/i, /(heavy|thick) smoke/i, /smoke (coming|pouring|filling)/i, /smell of burning/i],
     response: 'This may be an immediate fire hazard. Get everyone to a safe location and call 911. Do not re-enter the property to troubleshoot the problem.'
   },
   {
     severity: 'EMERGENCY',
     category: 'electrical_hazard',
-    patterns: [/sparks? (coming|shooting|from)/i, /electrical fire/i, /outlet.*(smoking|burning)/i, /wire.*(smoking|burning)/i],
+    patterns: [
+      /\b(active )?sparks?\b/i,
+      /electrical fire/i,
+      /outlet.*(smoking|burning|hot)/i,
+      /wire.*(smoking|burning|hot|exposed)/i,
+      /\b(burning|hot) outlet\b/i
+    ],
     response: 'This may be an immediate electrical/fire hazard. Keep away from the affected equipment. If there is fire, smoke, active arcing, or immediate danger, leave the area and call 911. Do not touch exposed wiring.'
   },
   {
     severity: 'EMERGENCY',
     category: 'major_water',
-    patterns: [/water (is )?(pouring|gushing|shooting)/i, /burst (pipe|water line)/i, /pipe (burst|broke)/i, /ceiling.*(pouring|gushing)/i],
+    patterns: [
+      /water (is )?(pouring|gushing|shooting|leaking)/i,
+      /\b(active(ly)?|currently|right now)\b.*\b(leak(ing)?|water)\b/i,
+      /\b(roof|ceiling)\b.*\bleak(ing)?\b/i,
+      /burst (pipe|water line)/i,
+      /pipe (burst|broke)/i,
+      /ceiling.*(pouring|gushing)/i
+    ],
     response: 'This appears to be an active major water leak. If you can safely reach the appropriate water shutoff without entering standing water near electrical equipment, shut the water off. Avoid electrical hazards and move away from any sagging ceiling. If there is immediate danger to people, call 911. Maintenance should be escalated immediately.'
   },
   {
     severity: 'URGENT',
     category: 'sewage',
-    patterns: [/sewage (backup|backing|overflow)/i, /sewer (backup|backing)/i, /toilet.*overflow.*won.t stop/i],
+    patterns: [/sewage (backup|backing|overflow)/i, /sewer (backup|backing|overflow)/i, /toilet.*overflow/i, /wastewater/i],
     response: 'This is an urgent sanitation issue. Avoid contact with wastewater and keep children and pets away from the affected area. Stop using fixtures that may be contributing to the backup. Maintenance should be notified promptly.'
   },
   {
-    severity: 'URGENT',
-    category: 'no_heat',
-    patterns: [/no heat/i, /furnace (is )?(not working|out|dead)/i, /heat (is )?(not working|out)/i],
-    response: 'I have this as an urgent no-heat request. Please tell me the property address/unit and whether the thermostat has power. Do not use an oven or other unsafe appliance for space heating.'
+    severity: 'EMERGENCY',
+    category: 'no_hvac',
+    patterns: [/no heat/i, /furnace (is )?(not working|out|dead)/i, /heat (is )?(not working|out)/i, /no ac/i, /\bac (is )?(not working|out|dead)\b/i, /air condition(er|ing).*(not working|out|dead)/i],
+    response: 'I have this as an emergency heating/cooling request. Please tell me the property address/unit and whether the thermostat has power. Do not use an oven or other unsafe appliance for heating.'
   },
   {
     severity: 'PRIORITY',
