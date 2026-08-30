@@ -1,10 +1,10 @@
 # Maintenance Triage Agent
 
-Production-shaped Phase 1 backend for receiving AgentPhone webhook events and triaging maintenance requests for First Call Maintenance.
+Production-shaped Phase 1 backend for receiving inbound phone/SMS traffic and triaging maintenance requests for First Call Maintenance. **Twilio is the active phone integration.**
 
 Phase 1 establishes:
-- AgentPhone webhook endpoint
-- timestamp-bound HMAC webhook verification
+- Twilio SMS/MMS and Voice webhook endpoints (with an alternate AgentPhone endpoint)
+- Twilio request-signature verification (`X-Twilio-Signature`)
 - normalized inbound message parsing
 - deterministic safety-first maintenance triage
 - emergency escalation guidance
@@ -14,34 +14,42 @@ Phase 1 establishes:
 
 ## Architecture
 
-Tenant -> AgentPhone -> `/api/agentphone/webhook` -> signature verification -> triage engine -> structured response
+Caller/Tenant -> Twilio number -> `/api/twilio/sms` or `/api/twilio/voice` -> signature verification -> triage engine -> TwiML response
 
-The initial triage engine is intentionally deterministic. AI-assisted classification can be layered on later, but safety-critical categories are not delegated to an LLM alone.
+The triage engine is intentionally deterministic. AI-assisted classification can be layered on later, but safety-critical categories are not delegated to an LLM alone.
 
-Voice calls receive an immediate spoken triage response through the webhook. SMS/MMS/iMessage are classified and logged but are not yet replied to: safe production replies need the outbound Messages API plus durable webhook idempotency, so a retry cannot send duplicate texts.
+- **SMS/MMS** replies immediately with a TwiML `<Message>` containing the triage guidance.
+- **Voice** answers with a TwiML `<Gather input="speech">` prompt, then triages the transcribed request and speaks the guidance back with `<Say>`.
 
 ## Local setup
 
 1. Install dependencies: `npm install`
 2. Copy `.env.example` to `.env.local`
-3. Set `AGENTPHONE_WEBHOOK_SECRET` to the secret returned when configuring the AgentPhone webhook.
+3. Set `TWILIO_AUTH_TOKEN` (from the Twilio Console) so inbound webhook signatures can be verified.
 4. Run tests: `npm test`
 5. Run locally: `npm run dev`
 
 ## Endpoints
 
-- `POST /api/agentphone/webhook` - AgentPhone webhook receiver
+- `POST /api/twilio/sms` - Twilio Messaging webhook ("A message comes in")
+- `POST /api/twilio/voice` - Twilio Voice webhook ("A call comes in")
+- `POST /api/agentphone/webhook` - alternate AgentPhone webhook receiver
 - `GET /api/health` - health/configuration check
 
-## AgentPhone setup
+## Twilio setup
 
-Configure the project or agent webhook to:
+In the [Twilio Console](https://console.twilio.com) → **Phone Numbers → Manage → Active numbers → your number**:
 
-`https://YOUR_DEPLOYMENT/api/agentphone/webhook`
+| Setting | Value |
+| --- | --- |
+| **Voice — A call comes in** | Webhook, `https://YOUR_DEPLOYMENT/api/twilio/voice`, HTTP POST |
+| **Messaging — A message comes in** | Webhook, `https://YOUR_DEPLOYMENT/api/twilio/sms`, HTTP POST |
 
-Set AgentPhone to include recent conversation context. Keep the webhook secret only in deployment environment variables.
+Then set `TWILIO_AUTH_TOKEN` in your Vercel project environment variables (Production) to your Twilio **Auth Token**. Redeploy so the variable takes effect.
 
-AgentPhone signs `timestamp.raw_body`; the endpoint rejects missing, malformed, or older-than-five-minute deliveries. Before production, add a persistent idempotency store keyed by `X-Webhook-ID` so a provider retry cannot create a duplicate work order or send duplicate messages.
+Twilio signs each request with `X-Twilio-Signature` (HMAC-SHA1 over the exact request URL plus the sorted POST parameters). The endpoints reject any request whose signature does not match. If validation fails because the reconstructed URL does not match the host Twilio actually called (custom domain, redirect), set `TWILIO_WEBHOOK_BASE_URL` to the exact base URL Twilio uses (e.g. `https://your-app.vercel.app`).
+
+Before creating real work orders or sending outbound messages, add a persistent idempotency store keyed by `MessageSid`/`CallSid` so a Twilio retry cannot duplicate work.
 
 ## Safety model
 

@@ -4,15 +4,17 @@
 
 Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webhook and classify it safely enough to drive intake and escalation workflows.
 
-## Request path
+## Request path (Twilio — active integration)
 
-1. AgentPhone receives SMS/iMessage or a voice transcript.
-2. AgentPhone sends a signed `agent.message` event to `/api/agentphone/webhook`.
-3. The backend verifies `X-Webhook-Signature` against `X-Webhook-Timestamp` and the exact raw body before processing the event.
-4. The event is normalized into a provider-independent shape.
+1. A tenant texts or calls the Twilio number.
+2. Twilio sends a signed form-encoded POST to `/api/twilio/sms` (Messaging) or `/api/twilio/voice` (Voice).
+3. The backend reconstructs the request URL and verifies `X-Twilio-Signature` (HMAC-SHA1 over the URL + sorted POST params) before processing.
+4. The relevant field (`Body` for SMS, `SpeechResult` for voice) is passed to the provider-independent triage engine.
 5. Deterministic safety rules run before any future AI classifier.
-6. For voice, a tenant-facing spoken response and triage state are returned. SMS/MMS/iMessage replies will be sent through the outbound Messages API after durable idempotency is implemented.
+6. SMS replies with TwiML `<Message>`; voice gathers speech then answers with TwiML `<Say>`.
 7. A privacy-conscious audit event is logged without the message body or phone number.
+
+An alternate `/api/agentphone/webhook` path (HMAC-SHA256 over `timestamp.raw_body`, JSON in/out) remains available for the AgentPhone provider and shares the same triage engine.
 
 ## Severity contract
 
@@ -23,9 +25,9 @@ Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webh
 
 ## Security boundaries
 
-- Reject unsigned/invalid webhook requests.
-- Reject deliveries outside AgentPhone's five-minute replay window.
-- Never commit AgentPhone/OpenAI/database secrets.
+- Reject unsigned/invalid webhook requests (Twilio `X-Twilio-Signature`; AgentPhone `X-Webhook-Signature`).
+- Reject AgentPhone deliveries outside its five-minute replay window.
+- Never commit Twilio/AgentPhone/OpenAI/database secrets; store the Twilio Auth Token only in deployment environment variables.
 - Avoid logging message bodies and phone numbers by default.
 - Do not let an LLM downgrade a deterministic emergency match in future phases.
 - Persistent records should use least-privilege database credentials and explicit retention rules.
@@ -33,7 +35,7 @@ Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webh
 ## Phase 1 limitations
 
 - Tenant/property identity is not yet persisted.
-- Webhook IDs are not yet persisted for retry idempotency; complete this before creating real work orders or sending notifications.
+- `MessageSid`/`CallSid` are not yet persisted for retry idempotency; complete this before creating real work orders or sending outbound notifications.
 - Escalation notifications are not yet dispatched.
 - No work-order system integration exists yet.
 - AI classification is intentionally not enabled yet.

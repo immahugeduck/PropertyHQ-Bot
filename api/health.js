@@ -8,6 +8,7 @@ export default function handler(req, res) {
     status: 'ok',
     service: 'maintenance-triage-agent',
     phase: 1,
+    twilioConfigured: Boolean(process.env.TWILIO_AUTH_TOKEN),
     agentPhoneWebhookConfigured: Boolean(process.env.AGENTPHONE_WEBHOOK_SECRET)
   });
 }
