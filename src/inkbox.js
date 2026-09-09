@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { classifyMaintenanceRequest } from './triage.js';
 
 // Inkbox adapter for the First Call Maintenance communications agent.
@@ -36,6 +37,46 @@ const SEVERITY_SUBJECT_TAG = Object.freeze({
 
 const SIGNATURE = 'First Call Maintenance';
 
+// Quoted-reply markers email clients prepend when a tenant replies. When a
+// webhook or MCP read hands us a full email body, everything from the first of
+// these onward is the previous message quoted back, not the tenant's new words.
+// Classifying the whole thing would score against stale text from earlier in
+// the thread, so strip it before triage.
+const QUOTE_MARKERS = [
+  /^-{2,}\s*Original Message\s*-{2,}/im,
+  /^On .+ wrote:\s*$/im,
+  /^_{5,}\s*$/m,
+  /^From:\s.+$/im,
+  /^Sent from /im,
+  /^>{1,}/m
+];
+
+/** Return only the tenant's newly written text, dropping quoted reply history. */
+export function stripQuotedReply(text = '') {
+  let earliest = text.length;
+  for (const marker of QUOTE_MARKERS) {
+    const match = marker.exec(text);
+    if (match && match.index < earliest) earliest = match.index;
+  }
+  return text.slice(0, earliest).trim();
+}
+
+/**
+ * Verify an Inkbox webhook signature.
+ *
+ * PROVISIONAL: Inkbox's exact webhook signing scheme must be confirmed against
+ * one real delivery (header name + whether a timestamp is included) before this
+ * is trusted in production, exactly as ARCHITECTURE.md notes for AgentPhone.
+ * Default assumption: `X-Inkbox-Signature: sha256=<hex HMAC of the raw body>`.
+ */
+export function verifyInkboxSignature(rawBody, signature, secret) {
+  if (!secret || !signature || !rawBody) return false;
+  const expected = `sha256=${crypto.createHmac('sha256', secret).update(Buffer.from(rawBody)).digest('hex')}`;
+  const supplied = String(signature).trim();
+  if (supplied.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(supplied, 'utf8'), Buffer.from(expected, 'utf8'));
+}
+
 function firstString(...values) {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) return value.trim();
@@ -56,7 +97,7 @@ export function normalizeInboundMessage(payload = {}) {
   const rawChannel = firstString(payload?.channel, data.channel, data.type).toLowerCase();
   const channel = SUPPORTED_CHANNELS.includes(rawChannel) ? rawChannel : (rawChannel || 'unknown');
 
-  const body = firstString(
+  const rawBody = firstString(
     data.body,
     data.text,
     data.message,
@@ -66,6 +107,17 @@ export function normalizeInboundMessage(payload = {}) {
     payload?.text,
     payload?.message
   );
+  // Email replies arrive with the previous message quoted underneath; iMessage/
+  // SMS don't quote, so stripping is a safe no-op there.
+  const body = stripQuotedReply(rawBody);
+
+  const attachmentCount = Array.isArray(data.attachments)
+    ? data.attachments.length
+    : Number(data.num_media ?? payload?.num_media ?? 0) || 0;
+  const hasMedia =
+    attachmentCount > 0 ||
+    data.has_attachments === true ||
+    Boolean(firstString(data.media_url, data.mediaUrl, payload?.media_url));
 
   return {
     channel,
@@ -81,10 +133,19 @@ export function normalizeInboundMessage(payload = {}) {
     from: firstString(data.from, data.from_address, data.sender, data.handle, payload?.from) || null,
     subject: firstString(data.subject, payload?.subject) || null,
     message: body,
+    hasMedia,
     direction: firstString(data.direction, payload?.direction) || null,
     raw: payload
   };
 }
+
+// Reply when a tenant sends media (a photo) or an otherwise empty message with
+// no words to classify. Silence is the wrong answer on a live channel, so ask
+// for the one line of context the triage engine needs.
+const NO_TEXT_REPLY =
+  'Thanks for contacting First Call Maintenance. I can see your message but no description of the problem. Please send a short note of what is wrong and the property address/unit so I can help.';
+const NO_TEXT_WITH_MEDIA_REPLY =
+  'Thanks — I got your photo. Please add a short description of the problem and the property address/unit so I can route it correctly.';
 
 /** Build the subject + body of an email reply from a triage result. */
 export function formatEmailReply(triage, inbound = {}) {
@@ -114,18 +175,23 @@ export function formatChatReply(triage) {
  * produce the reply payload for the channel it arrived on. `classify` is
  * injectable for tests but defaults to the shared deterministic engine.
  *
- * Returns `{ inbound, triage, reply }`. `reply` is null when there is no usable
- * message text or the channel is unsupported; the caller (the MCP-driven agent
- * loop) decides how to acknowledge those cases.
+ * Returns `{ inbound, triage, reply }`. On an unsupported channel `reply` is
+ * null (nothing to send). When there is no message text the tenant still gets a
+ * prompt reply (triage stays null) — going silent on a live channel is wrong.
  */
 export function triageInboundMessage(payload, classify = classifyMaintenanceRequest) {
   const inbound = normalizeInboundMessage(payload);
+  const asReply = (text, extra = {}) =>
+    inbound.channel === 'email'
+      ? { kind: 'email', subject: emptySubject(inbound), body: `Hi,\n\n${text}\n\n— ${SIGNATURE}`, ...extra }
+      : { kind: 'chat', text, ...extra };
 
   if (!SUPPORTED_CHANNELS.includes(inbound.channel)) {
     return { inbound, triage: null, reply: null, reason: 'unsupported_channel' };
   }
   if (!inbound.message) {
-    return { inbound, triage: null, reply: null, reason: 'empty_message' };
+    const text = inbound.hasMedia ? NO_TEXT_WITH_MEDIA_REPLY : NO_TEXT_REPLY;
+    return { inbound, triage: null, reply: asReply(text), reason: inbound.hasMedia ? 'media_only' : 'empty_message' };
   }
 
   const triage = classify(inbound.message);
@@ -135,4 +201,9 @@ export function triageInboundMessage(payload, classify = classifyMaintenanceRequ
       : { kind: 'chat', text: formatChatReply(triage) };
 
   return { inbound, triage, reply };
+}
+
+function emptySubject(inbound) {
+  const base = firstString(inbound.subject) || 'Your maintenance request';
+  return /^re:/i.test(base) ? base : `Re: ${base}`;
 }

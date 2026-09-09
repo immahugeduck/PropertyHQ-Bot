@@ -34,6 +34,7 @@ The triage engine is intentionally deterministic. AI-assisted classification can
 - `POST /api/twilio/sms` - Twilio Messaging webhook ("A message comes in")
 - `POST /api/twilio/voice` - Twilio Voice webhook ("A call comes in")
 - `POST /api/agentphone/webhook` - alternate AgentPhone webhook receiver
+- `POST /api/inkbox/imessage` - Inkbox iMessage webhook receiver (triage reply as JSON)
 - `GET /api/health` - health/configuration check
 
 ## Twilio setup
@@ -83,8 +84,30 @@ on its own. Instead, on each invocation the agent:
 `src/inkbox.js` holds the pure, testable core of that loop
 (`normalizeInboundMessage`, `formatEmailReply`, `formatChatReply`,
 `triageInboundMessage`); `test/inkbox.test.js` covers it. Because Inkbox acts
-only when invoked, continuous handling requires a scheduled task or gateway that
-runs the agent on a cadence — the MCP connection itself does not poll.
+only when invoked, continuous handling requires either a scheduled task/gateway
+that runs the agent on a cadence, or the iMessage webhook below.
+
+### iMessage connect flow
+
+Tenants reach the agent over iMessage through Inkbox's shared router (from
+`inkbox_imessage_onboarding_get`): they text `connect @tenant-coms-agent` to the
+triage number **+1 650-484-9720**, which links their iMessage to this agent.
+The identity has no dedicated iMessage number assigned yet.
+
+### iMessage webhook (`POST /api/inkbox/imessage`)
+
+When Inkbox is configured to POST inbound iMessages, `api/inkbox/imessage.js`
+verifies the delivery, runs the shared triage engine, and returns the reply
+text as JSON. It reuses `src/inkbox.js`, so quoted-reply stripping and the
+photo-only prompt apply here too. `test/inkbox-webhook.test.js` covers it.
+
+- Set `INKBOX_WEBHOOK_SECRET` so `X-Inkbox-Signature` is verified. The endpoint
+  refuses to run without it unless `INKBOX_WEBHOOK_ALLOW_UNVERIFIED=true` is set
+  explicitly (testing only).
+- **Provisional:** the exact signature scheme, inbound field names, and how
+  Inkbox consumes the response must be validated against one real delivery
+  before production use (same caveat this repo already carries for AgentPhone).
+  `verifyInkboxSignature` assumes `sha256=<hex HMAC of the raw body>`.
 
 ### Trust boundary
 

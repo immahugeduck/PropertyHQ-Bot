@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {
   normalizeInboundMessage,
   formatEmailReply,
   formatChatReply,
   triageInboundMessage,
+  stripQuotedReply,
+  verifyInkboxSignature,
   SUPPORTED_CHANNELS
 } from '../src/inkbox.js';
 
@@ -78,10 +81,46 @@ test('triageInboundMessage returns a chat reply for iMessage', () => {
   assert.equal(result.triage.severity, 'EMERGENCY');
 });
 
-test('an empty message produces no reply and an empty_message reason', () => {
-  const result = triageInboundMessage({ channel: 'email', data: { subject: 'photo only', body: '' } });
-  assert.equal(result.reply, null);
+test('an empty message with no media prompts for a description', () => {
+  const result = triageInboundMessage({ channel: 'imessage', data: { text: '' } });
+  assert.equal(result.triage, null);
   assert.equal(result.reason, 'empty_message');
+  assert.match(result.reply.text, /no description/i);
+});
+
+test('a photo-only message is acknowledged and asks for detail instead of going silent', () => {
+  const result = triageInboundMessage({
+    channel: 'imessage',
+    data: { text: '', attachments: [{ filename: 'IMG_1.jpg' }] }
+  });
+  assert.equal(result.reason, 'media_only');
+  assert.match(result.reply.text, /got your photo/i);
+});
+
+test('stripQuotedReply keeps only the tenant new text', () => {
+  const full = 'The sink is leaking again.\n\n-------- Original Message --------\nOn Tue wrote:\nold stuff';
+  assert.equal(stripQuotedReply(full), 'The sink is leaking again.');
+});
+
+test('a reply email is triaged on the new text, not the quoted thread', () => {
+  const result = triageInboundMessage({
+    channel: 'email',
+    data: {
+      subject: 'Re: leak',
+      body: 'It is leaking steadily under the sink.\n\nOn Mon someone wrote:\nI smell gas everywhere fire flames'
+    }
+  });
+  // Must NOT pick up EMERGENCY words from the quoted original.
+  assert.equal(result.triage.severity, 'PRIORITY');
+  assert.equal(result.triage.category, 'water_leak');
+});
+
+test('a valid Inkbox signature verifies and a tampered one is rejected', () => {
+  const body = Buffer.from('{"channel":"imessage","data":{"text":"leak"}}');
+  const secret = 'inkbox-secret';
+  const good = `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`;
+  assert.equal(verifyInkboxSignature(body, good, secret), true);
+  assert.equal(verifyInkboxSignature(body, 'sha256=deadbeef', secret), false);
 });
 
 test('an unsupported channel produces no reply', () => {
