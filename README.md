@@ -51,6 +51,49 @@ Twilio signs each request with `X-Twilio-Signature` (HMAC-SHA1 over the exact re
 
 Before creating real work orders or sending outbound messages, add a persistent idempotency store keyed by `MessageSid`/`CallSid` so a Twilio retry cannot duplicate work.
 
+## Inkbox AI communications agent (email + iMessage)
+
+This branch adds **Inkbox** as an AI communications channel, separate from the
+Twilio phone integration. The agent runs as an Inkbox identity — agent handle
+`tenant-coms-agent`, display name "Agent-Coms" — and is driven through the
+Inkbox MCP tools rather than an inbound HTTP webhook.
+
+Live channels on this identity (from `inkbox_channel_status_get`):
+
+| Channel | Status |
+| --- | --- |
+| Email (`tenant-coms-agent@inkboxmail.com`) | active |
+| iMessage (shared router) | enabled |
+| SMS / voice calling | **not available** — needs a phone number assigned to the identity |
+
+### How it works
+
+Inkbox does not push signed webhooks into this app and does not wake the model
+on its own. Instead, on each invocation the agent:
+
+1. reads inbound email/iMessage with the Inkbox MCP read tools
+   (`inkbox_conversations_list`, `inkbox_emails_list`, `inkbox_email_get`, …),
+2. runs each message through the **same deterministic triage engine**
+   (`src/triage.js`) the phone paths use — safety-critical categories are never
+   delegated to an LLM alone,
+3. formats a reply in First Call Maintenance's voice with `src/inkbox.js`, and
+4. sends it back on the same channel (`inkbox_email_reply`,
+   `inkbox_imessage_send`).
+
+`src/inkbox.js` holds the pure, testable core of that loop
+(`normalizeInboundMessage`, `formatEmailReply`, `formatChatReply`,
+`triageInboundMessage`); `test/inkbox.test.js` covers it. Because Inkbox acts
+only when invoked, continuous handling requires a scheduled task or gateway that
+runs the agent on a cadence — the MCP connection itself does not poll.
+
+### Trust boundary
+
+The MCP connection is the authenticated channel, so there is no per-message HMAC
+to verify (that is what the Twilio/AgentPhone signature checks are for). Message
+content is still untrusted sender-authored text; it is only ever run through the
+deterministic regex triage engine and echoed into templated reply text, never
+executed or used to build a request.
+
 ## Safety model
 
 Phase 1 recognizes explicit emergency signals including suspected gas/CO, fire/smoke, electrical arcing/fire, major active flooding, sewage backup with exposure risk, and immediate life-safety hazards. Emergency responses tell the occupant to prioritize personal safety and appropriate emergency/utility services rather than waiting for maintenance.
