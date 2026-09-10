@@ -95,9 +95,10 @@ Tenants reach the agent over iMessage two ways:
   `connect @tenant-coms-agent` to the triage number **+1 650-484-9720** — this
   is Inkbox's shared line for all agents — to link to this agent.
 - **Direct line:** **+1 717-660-7624**, the tenant's dedicated line for this
-  agent (owner-provided). Not yet reflected by `inkbox_channel_status_get`
-  (`dedicated_number: null`) — confirm it is provisioned on the
-  `tenant-coms-agent` identity before relying on it.
+  agent, confirmed by Inkbox's connect flow ("You're now connected to agent
+  @tenant-coms-agent. Text them at +17176607624"). `inkbox_channel_status_get`
+  still reports `dedicated_number: null` — that API field does not surface the
+  dedicated line, but it is live.
 
 ### iMessage webhook (`POST /api/inkbox/imessage`)
 
