@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   triageInboundMessage,
   verifyInkboxSignature
@@ -62,6 +63,23 @@ export default async function handler(req, res) {
     throw error;
   }
   if (!rawBody) return res.status(400).json({ error: 'raw_body_unavailable' });
+
+  // Capture mode: TEMPORARY. Set INKBOX_WEBHOOK_DEBUG=true to log the exact
+  // headers + body Inkbox posts so the signature scheme and field mapping can be
+  // locked to the real format, then turn it off. Do not leave on in production —
+  // it writes message content to the logs.
+  if (process.env.INKBOX_WEBHOOK_DEBUG === 'true') {
+    const expectedIfSecret = secret
+      ? `sha256=${crypto.createHmac('sha256', secret).update(rawBody).digest('hex')}`
+      : null;
+    console.log(JSON.stringify({
+      type: 'inkbox_webhook_capture',
+      method: req.method,
+      headers: req.headers,
+      bodyText: rawBody.toString('utf8'),
+      ourExpectedSignature: expectedIfSecret
+    }));
+  }
 
   if (secret) {
     const signature = req.headers['x-inkbox-signature'] ?? '';
