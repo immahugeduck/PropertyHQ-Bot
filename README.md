@@ -89,10 +89,15 @@ that runs the agent on a cadence, or the iMessage webhook below.
 
 ### iMessage connect flow
 
-Tenants reach the agent over iMessage through Inkbox's shared router (from
-`inkbox_imessage_onboarding_get`): they text `connect @tenant-coms-agent` to the
-triage number **+1 650-484-9720**, which links their iMessage to this agent.
-The identity has no dedicated iMessage number assigned yet.
+Tenants reach the agent over iMessage two ways:
+
+- **Shared router** (from `inkbox_imessage_onboarding_get`): text
+  `connect @tenant-coms-agent` to the triage number **+1 650-484-9720** — this
+  is Inkbox's shared line for all agents — to link to this agent.
+- **Direct line:** **+1 717-660-7624**, the tenant's dedicated line for this
+  agent (owner-provided). Not yet reflected by `inkbox_channel_status_get`
+  (`dedicated_number: null`) — confirm it is provisioned on the
+  `tenant-coms-agent` identity before relying on it.
 
 ### iMessage webhook (`POST /api/inkbox/imessage`)
 
