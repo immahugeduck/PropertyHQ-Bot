@@ -17,6 +17,11 @@ import { auditEvent } from '../../src/audit.js';
 //   - how Inkbox consumes the response (sync reply body vs. async send)
 // Safe by default: without INKBOX_WEBHOOK_SECRET the endpoint refuses to run
 // unless INKBOX_WEBHOOK_ALLOW_UNVERIFIED=true is set explicitly for testing.
+//
+// NOTE: Vercel binds environment variables at deploy time, so changing
+// INKBOX_WEBHOOK_* in the dashboard only takes effect after a redeploy of the
+// branch. Also ensure the deployment is not behind Vercel Authentication (SSO),
+// or Inkbox's POST is blocked before it ever reaches this function.
 
 export const config = { api: { bodyParser: false } };
 
