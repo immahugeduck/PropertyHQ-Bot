@@ -77,6 +77,30 @@ test('the endpoint refuses to run unconfigured (no secret, no explicit opt-in)',
   }
 });
 
+test('a pre-parsed object body (Vercel-style) is handled, not 400', async () => {
+  const prevSecret = process.env.INKBOX_WEBHOOK_SECRET;
+  const prevAllow = process.env.INKBOX_WEBHOOK_ALLOW_UNVERIFIED;
+  delete process.env.INKBOX_WEBHOOK_SECRET;
+  process.env.INKBOX_WEBHOOK_ALLOW_UNVERIFIED = 'true';
+  try {
+    // Simulate Vercel having already parsed the JSON into req.body.
+    const req = {
+      method: 'POST',
+      body: { data: { text: 'water pouring out under the water heater', conversation_id: 'im_2' } },
+      headers: { 'content-type': 'application/json' }
+    };
+    const res = responseSpy();
+    await imessageHandler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.severity, 'EMERGENCY');
+    assert.match(res.body.reply, /water/i);
+  } finally {
+    if (prevSecret !== undefined) process.env.INKBOX_WEBHOOK_SECRET = prevSecret;
+    if (prevAllow !== undefined) process.env.INKBOX_WEBHOOK_ALLOW_UNVERIFIED = prevAllow;
+    else delete process.env.INKBOX_WEBHOOK_ALLOW_UNVERIFIED;
+  }
+});
+
 test('a non-POST method is rejected with 405', () =>
   withSecret(async () => {
     const res = responseSpy();
