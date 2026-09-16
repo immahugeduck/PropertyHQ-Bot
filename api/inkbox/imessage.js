@@ -87,16 +87,24 @@ export default async function handler(req, res) {
   // when INKBOX_WEBHOOK_DEBUG=true OR while running unverified (test mode). Do
   // not leave on in production — it writes message content to the logs.
   if (process.env.INKBOX_WEBHOOK_DEBUG === 'true' || allowUnverified) {
-    const expectedIfSecret = secret
-      ? `sha256=${crypto.createHmac('sha256', secret).update(Buffer.from(rawText, 'utf8')).digest('hex')}`
+    // Log the body on its own line so Vercel's large proxy/OIDC headers can't
+    // truncate it. When a secret is set, log candidate HMACs over three common
+    // signing schemes so the real one can be matched against x-inkbox-signature.
+    const ts = req.headers['x-inkbox-timestamp'] ?? '';
+    const candidates = secret
+      ? {
+          body_only: `sha256=${crypto.createHmac('sha256', secret).update(Buffer.from(rawText, 'utf8')).digest('hex')}`,
+          ts_dot_body: `sha256=${crypto.createHmac('sha256', secret).update(`${ts}.${rawText}`).digest('hex')}`,
+          ts_plus_body: `sha256=${crypto.createHmac('sha256', secret).update(`${ts}${rawText}`).digest('hex')}`
+        }
       : null;
+    console.log(JSON.stringify({ type: 'inkbox_webhook_body', bodyText: rawText }));
     console.log(JSON.stringify({
       type: 'inkbox_webhook_capture',
-      method: req.method,
       preParsed: payload !== undefined,
-      headers: req.headers,
-      bodyText: rawText,
-      ourExpectedSignature: expectedIfSecret
+      suppliedSignature: req.headers['x-inkbox-signature'] ?? null,
+      timestamp: ts || null,
+      candidateSignatures: candidates
     }));
   }
 
