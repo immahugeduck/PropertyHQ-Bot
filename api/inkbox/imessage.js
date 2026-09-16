@@ -142,9 +142,19 @@ export default async function handler(req, res) {
     verified: Boolean(secret)
   });
 
+  // PROVISIONAL response shape: it is not yet confirmed which field (if any)
+  // Inkbox reads from the webhook response to send a reply back to the tenant.
+  // Until that contract is known, expose the reply text under the common keys so
+  // whichever one Inkbox looks for is present. `messages` covers array-style
+  // agent-reply contracts. Trim to the confirmed field once known.
+  const replyText = reply ? reply.text : null;
   return res.status(200).json({
     received: true,
-    reply: reply ? reply.text : null,
+    reply: replyText,
+    text: replyText,
+    message: replyText,
+    response: replyText,
+    messages: replyText ? [{ text: replyText }] : [],
     severity: triage?.severity ?? null,
     category: triage?.category ?? null,
     reason: reason ?? null
