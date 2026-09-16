@@ -94,47 +94,61 @@ function firstString(...values) {
  */
 export function normalizeInboundMessage(payload = {}) {
   const data = payload?.data ?? payload ?? {};
-  const rawChannel = firstString(payload?.channel, data.channel, data.type).toLowerCase();
+  // The live Inkbox webhook nests the inbound message as an object at
+  // data.message ({ content, conversation_id, direction, id, sender, media, ... }).
+  // Other/simpler shapes pass the text directly as data.text/body/message.
+  const msg = data.message && typeof data.message === 'object' ? data.message : null;
+  const messageString = typeof data.message === 'string' ? data.message : '';
+
+  const rawChannel = firstString(
+    payload?.channel,
+    data.channel,
+    msg?.channel,
+    data.type
+  ).toLowerCase();
   const channel = SUPPORTED_CHANNELS.includes(rawChannel) ? rawChannel : (rawChannel || 'unknown');
 
   const rawBody = firstString(
+    msg?.content,
     data.body,
     data.text,
-    data.message,
+    messageString,
     data.plain_body,
     data.snippet,
     payload?.body,
-    payload?.text,
-    payload?.message
+    payload?.text
   );
   // Email replies arrive with the previous message quoted underneath; iMessage/
   // SMS don't quote, so stripping is a safe no-op there.
   const body = stripQuotedReply(rawBody);
 
+  const media = msg?.media ?? data.media;
   const attachmentCount = Array.isArray(data.attachments)
     ? data.attachments.length
     : Number(data.num_media ?? payload?.num_media ?? 0) || 0;
   const hasMedia =
     attachmentCount > 0 ||
     data.has_attachments === true ||
+    (media != null && media !== '') ||
     Boolean(firstString(data.media_url, data.mediaUrl, payload?.media_url));
 
   return {
     channel,
-    messageId: firstString(data.id, data.message_id, data.email_id, payload?.id, payload?.message_id) || null,
+    messageId: firstString(msg?.id, data.id, data.message_id, data.email_id, payload?.id, payload?.message_id) || null,
     conversationId:
       firstString(
+        msg?.conversation_id,
         data.conversation_id,
         data.thread_id,
         payload?.conversation_id,
         payload?.thread_id,
         payload?.conversationId
       ) || null,
-    from: firstString(data.from, data.from_address, data.sender, data.handle, payload?.from) || null,
+    from: firstString(msg?.sender, data.from, data.from_address, data.sender, data.handle, payload?.from) || null,
     subject: firstString(data.subject, payload?.subject) || null,
     message: body,
     hasMedia,
-    direction: firstString(data.direction, payload?.direction) || null,
+    direction: firstString(msg?.direction, data.direction, payload?.direction) || null,
     raw: payload
   };
 }

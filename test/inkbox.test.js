@@ -129,6 +129,31 @@ test('an unsupported channel produces no reply', () => {
   assert.equal(result.reason, 'unsupported_channel');
 });
 
+test('the real Inkbox webhook shape (data.message object) is normalized and triaged', () => {
+  // Mirrors the live payload: data.message is an object with .content.
+  const payload = {
+    data: {
+      message: {
+        id: 'm_1',
+        content: 'I got a water leak coming from underneath my tub.',
+        conversation_id: '2964200f',
+        direction: 'inbound',
+        sender: '+17652464405'
+      },
+      contacts: [{ memories: ['ongoing basement water intrusion'] }]
+    }
+  };
+  const inbound = normalizeInboundMessage({ channel: 'imessage', ...payload });
+  assert.equal(inbound.message, 'I got a water leak coming from underneath my tub.');
+  assert.equal(inbound.conversationId, '2964200f');
+  assert.equal(inbound.from, '+17652464405');
+
+  const result = triageInboundMessage({ channel: 'imessage', ...payload });
+  assert.equal(result.reply.kind, 'chat');
+  assert.equal(result.triage.category, 'water_leak');
+  assert.match(result.reply.text, /water\/leak/i);
+});
+
 test('SUPPORTED_CHANNELS covers email, imessage and sms', () => {
   assert.deepEqual([...SUPPORTED_CHANNELS], ['email', 'imessage', 'sms']);
 });
