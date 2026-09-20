@@ -112,7 +112,8 @@ test('SMS handler returns signed triage TwiML for an emergency', async () => {
     assert.equal(res.statusCode, 200);
     assert.equal(res.headers['content-type'], 'text/xml; charset=utf-8');
     assert.match(res.body, /<Message>/);
-    assert.match(res.body, /immediate safety hazard/i);
+    assert.match(res.body, /flagged your request as an EMERGENCY/i);
+    assert.match(res.body, /call 911/i);
   } finally {
     if (prev === undefined) delete process.env.TWILIO_AUTH_TOKEN;
     else process.env.TWILIO_AUTH_TOKEN = prev;

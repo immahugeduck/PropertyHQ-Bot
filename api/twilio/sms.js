@@ -7,6 +7,8 @@ import {
   sendTwiml
 } from '../../src/twilio.js';
 import { classifyMaintenanceRequest } from '../../src/triage.js';
+import { buildTriagePayload, formatMaintenanceSms, formatManagerSms } from '../../src/outputs.js';
+import { dispatchNotifications } from '../../src/notify.js';
 import { auditEvent } from '../../src/audit.js';
 
 export const config = {
@@ -67,8 +69,38 @@ export default async function handler(req, res) {
     verified: true
   });
 
-  let reply = triage.response;
-  if (numMedia > 0 && triage.severity === 'ROUTINE') {
+  const payload = buildTriagePayload({
+    message,
+    triage,
+    tenantContact: params.From ?? null
+  });
+
+  // Fire the maintenance + manager notifications to the configured numbers.
+  // Never let a send failure block the tenant reply.
+  let dispatch = null;
+  try {
+    dispatch = await dispatchNotifications({
+      maintenanceBody: formatMaintenanceSms(payload),
+      managerBody: formatManagerSms(payload)
+    });
+  } catch (error) {
+    console.error('dispatch_notifications_failed', error?.message ?? error);
+  }
+
+  auditEvent({
+    event: 'triage.dispatch',
+    channel: 'sms',
+    conversationId,
+    severity: triage.severity,
+    category: triage.category,
+    verified: true,
+    maintenanceSent: dispatch?.maintenance?.sent ?? 0,
+    managerSent: dispatch?.manager?.sent ?? 0,
+    twilioConfigured: dispatch?.configured ?? false
+  });
+
+  let reply = payload.tenant_message.body;
+  if (numMedia > 0) {
     reply = `${reply} Thanks for the photo${numMedia > 1 ? 's' : ''}.`;
   }
 
