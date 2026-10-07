@@ -34,6 +34,7 @@ The triage engine is intentionally deterministic. AI-assisted classification can
 - `POST /api/twilio/sms` - Twilio Messaging webhook ("A message comes in")
 - `POST /api/twilio/voice` - Twilio Voice webhook ("A call comes in")
 - `POST /api/agentphone/webhook` - alternate AgentPhone webhook receiver
+- `POST /api/inkbox/imessage` - Inkbox iMessage webhook receiver (triage reply as JSON)
 - `GET /api/health` - health/configuration check
 
 ## Twilio setup
@@ -50,6 +51,77 @@ Then set `TWILIO_AUTH_TOKEN` in your Vercel project environment variables (Produ
 Twilio signs each request with `X-Twilio-Signature` (HMAC-SHA1 over the exact request URL plus the sorted POST parameters). The endpoints reject any request whose signature does not match. If validation fails because the reconstructed URL does not match the host Twilio actually called (custom domain, redirect), set `TWILIO_WEBHOOK_BASE_URL` to the exact base URL Twilio uses (e.g. `https://your-app.vercel.app`).
 
 Before creating real work orders or sending outbound messages, add a persistent idempotency store keyed by `MessageSid`/`CallSid` so a Twilio retry cannot duplicate work.
+
+## Inkbox AI communications agent (email + iMessage)
+
+This branch adds **Inkbox** as an AI communications channel, separate from the
+Twilio phone integration. The agent runs as an Inkbox identity — agent handle
+`tenant-coms-agent`, display name "Agent-Coms" — and is driven through the
+Inkbox MCP tools rather than an inbound HTTP webhook.
+
+Live channels on this identity (from `inkbox_channel_status_get`):
+
+| Channel | Status |
+| --- | --- |
+| Email (`tenant-coms-agent@inkboxmail.com`) | active |
+| iMessage (shared router) | enabled |
+| SMS / voice calling | **not available** — needs a phone number assigned to the identity |
+
+### How it works
+
+Inkbox does not push signed webhooks into this app and does not wake the model
+on its own. Instead, on each invocation the agent:
+
+1. reads inbound email/iMessage with the Inkbox MCP read tools
+   (`inkbox_conversations_list`, `inkbox_emails_list`, `inkbox_email_get`, …),
+2. runs each message through the **same deterministic triage engine**
+   (`src/triage.js`) the phone paths use — safety-critical categories are never
+   delegated to an LLM alone,
+3. formats a reply in First Call Maintenance's voice with `src/inkbox.js`, and
+4. sends it back on the same channel (`inkbox_email_reply`,
+   `inkbox_imessage_send`).
+
+`src/inkbox.js` holds the pure, testable core of that loop
+(`normalizeInboundMessage`, `formatEmailReply`, `formatChatReply`,
+`triageInboundMessage`); `test/inkbox.test.js` covers it. Because Inkbox acts
+only when invoked, continuous handling requires either a scheduled task/gateway
+that runs the agent on a cadence, or the iMessage webhook below.
+
+### iMessage connect flow
+
+Tenants reach the agent over iMessage two ways:
+
+- **Shared router** (from `inkbox_imessage_onboarding_get`): text
+  `connect @tenant-coms-agent` to the triage number **+1 650-484-9720** — this
+  is Inkbox's shared line for all agents — to link to this agent.
+- **Direct line:** **+1 717-660-7624**, the tenant's dedicated line for this
+  agent, confirmed by Inkbox's connect flow ("You're now connected to agent
+  @tenant-coms-agent. Text them at +17176607624"). `inkbox_channel_status_get`
+  still reports `dedicated_number: null` — that API field does not surface the
+  dedicated line, but it is live.
+
+### iMessage webhook (`POST /api/inkbox/imessage`)
+
+When Inkbox is configured to POST inbound iMessages, `api/inkbox/imessage.js`
+verifies the delivery, runs the shared triage engine, and returns the reply
+text as JSON. It reuses `src/inkbox.js`, so quoted-reply stripping and the
+photo-only prompt apply here too. `test/inkbox-webhook.test.js` covers it.
+
+- Set `INKBOX_WEBHOOK_SECRET` so `X-Inkbox-Signature` is verified. The endpoint
+  refuses to run without it unless `INKBOX_WEBHOOK_ALLOW_UNVERIFIED=true` is set
+  explicitly (testing only).
+- **Provisional:** the exact signature scheme, inbound field names, and how
+  Inkbox consumes the response must be validated against one real delivery
+  before production use (same caveat this repo already carries for AgentPhone).
+  `verifyInkboxSignature` assumes `sha256=<hex HMAC of the raw body>`.
+
+### Trust boundary
+
+The MCP connection is the authenticated channel, so there is no per-message HMAC
+to verify (that is what the Twilio/AgentPhone signature checks are for). Message
+content is still untrusted sender-authored text; it is only ever run through the
+deterministic regex triage engine and echoed into templated reply text, never
+executed or used to build a request.
 
 ## Safety model
 

@@ -16,6 +16,25 @@ Receive tenant maintenance traffic from AgentPhone through a standing HTTPS webh
 
 An alternate `/api/agentphone/webhook` path (HMAC-SHA256 over `timestamp.raw_body`, JSON in/out) remains available for the AgentPhone provider and shares the same triage engine.
 
+## Request path (Inkbox — AI communications agent)
+
+Inkbox is not an inbound HTTP webhook. The agent runs as an Inkbox identity
+(`tenant-coms-agent`) and is driven through the Inkbox MCP tools, so it acts
+only when invoked — continuous handling needs a scheduled task or gateway.
+
+1. The agent reads inbound email/iMessage via the Inkbox MCP read tools.
+2. Each message body is passed to the same provider-independent triage engine.
+3. Deterministic safety rules run exactly as they do for the phone paths.
+4. `src/inkbox.js` formats a channel-aware reply (email gets a subject +
+   FCM sign-off; iMessage/SMS get short text) which the agent sends back with
+   the Inkbox reply/send tools.
+
+Live channels on this identity: email (`tenant-coms-agent@inkboxmail.com`) and
+iMessage are active; SMS/voice require a phone number assigned to the identity.
+The MCP connection is the authenticated channel, so there is no per-message
+signature to verify; message content remains untrusted and only flows through
+the deterministic engine and templated replies.
+
 ## Severity contract
 
 - `ROUTINE`: ordinary maintenance intake.
