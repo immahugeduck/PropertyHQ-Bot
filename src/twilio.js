@@ -120,3 +120,18 @@ export function sendTwiml(res, twiml, status = 200) {
   res.setHeader('Content-Type', 'text/xml; charset=utf-8');
   return res.status(status).send(twiml);
 }
+
+/**
+ * Normalize a phone number typed in any common US format
+ * ("(765) 555-0123", "765-555-0123", "+1 765 555 0123") to E.164.
+ * Numbers already in international E.164 form pass through.
+ * Returns null when the value is not a usable number.
+ */
+export function normalizePhoneNumber(value) {
+  const raw = String(value ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (raw.startsWith('+') && /^[1-9]\d{7,14}$/.test(digits)) return `+${digits}`;
+  return null;
+}

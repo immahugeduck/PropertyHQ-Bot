@@ -6,10 +6,12 @@ import {
   parseFormBody,
   buildWebhookUrl,
   escapeXml,
-  smsTwiml
+  smsTwiml,
+  normalizePhoneNumber
 } from '../src/twilio.js';
 import smsHandler from '../api/twilio/sms.js';
 import voiceHandler from '../api/twilio/voice.js';
+import publicConfigHandler from '../api/twilio/public-config.js';
 import { classifyKeyword } from '../src/keywords.js';
 
 const AUTH_TOKEN = 'test-auth-token';
@@ -231,5 +233,41 @@ test('SMS handler still triages a request that starts with a keyword', async () 
   } finally {
     if (prev === undefined) delete process.env.TWILIO_AUTH_TOKEN;
     else process.env.TWILIO_AUTH_TOKEN = prev;
+  }
+});
+
+test('normalizePhoneNumber accepts common US formats', () => {
+  for (const input of ['+17655550123', '(765) 555-0123', '765-555-0123', '765.555.0123', '7655550123', '1 765 555 0123', ' +1 (765) 555-0123 ']) {
+    assert.equal(normalizePhoneNumber(input), '+17655550123', input);
+  }
+  assert.equal(normalizePhoneNumber('+447911123456'), '+447911123456');
+  for (const input of ['', undefined, '555-0123', 'not a number', '+0123']) {
+    assert.equal(normalizePhoneNumber(input), null, String(input));
+  }
+});
+
+test('public config serves a human-formatted TWILIO_NUMBER as E.164', () => {
+  const prev = process.env.TWILIO_NUMBER;
+  process.env.TWILIO_NUMBER = '(765) 555-0123';
+  try {
+    const res = responseSpy();
+    publicConfigHandler({ method: 'GET' }, res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, { smsNumber: '+17655550123' });
+  } finally {
+    if (prev === undefined) delete process.env.TWILIO_NUMBER;
+    else process.env.TWILIO_NUMBER = prev;
+  }
+});
+
+test('public config returns 503 when TWILIO_NUMBER is missing', () => {
+  const prev = process.env.TWILIO_NUMBER;
+  delete process.env.TWILIO_NUMBER;
+  try {
+    const res = responseSpy();
+    publicConfigHandler({ method: 'GET' }, res);
+    assert.equal(res.statusCode, 503);
+  } finally {
+    if (prev !== undefined) process.env.TWILIO_NUMBER = prev;
   }
 });
