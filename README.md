@@ -52,6 +52,18 @@ Twilio signs each request with `X-Twilio-Signature` (HMAC-SHA1 over the exact re
 
 Before creating real work orders or sending outbound messages, add a persistent idempotency store keyed by `MessageSid`/`CallSid` so a Twilio retry cannot duplicate work.
 
+### STOP / START / HELP keywords
+
+Twilio replies to these keywords itself and still forwards them to `/api/twilio/sms`. The handler recognizes them (whole-message match, any case, or Twilio's `OptOutType` parameter), logs a `twilio.keyword` audit event, and returns an empty TwiML response, so the customer never gets a second reply and keywords never go through triage.
+
+To make Twilio's replies match the A2P campaign registration, enable **Advanced Opt-Out** on the campaign's Messaging Service (Messaging → Services → your service → Opt-Out Management) and set:
+
+| Type | Reply |
+| --- | --- |
+| Opt-in (START) | First Call Maintenance: You're enrolled in maintenance text alerts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out. |
+| Help (HELP) | First Call Maintenance: For help with a maintenance request, visit firstcallmaintenance.biz. For emergencies call 911. Msg & data rates may apply. Reply STOP to opt out. |
+| Opt-out (STOP) | First Call Maintenance: You're unsubscribed and will receive no further texts. Reply START to resubscribe. |
+
 ## Inkbox AI communications agent (email + iMessage)
 
 This branch adds **Inkbox** as an AI communications channel, separate from the
