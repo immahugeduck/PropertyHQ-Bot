@@ -10,6 +10,7 @@ import {
 } from '../src/twilio.js';
 import smsHandler from '../api/twilio/sms.js';
 import voiceHandler from '../api/twilio/voice.js';
+import { classifyKeyword } from '../src/keywords.js';
 
 const AUTH_TOKEN = 'test-auth-token';
 
@@ -177,6 +178,56 @@ test('voice handler triages a transcribed emergency and hangs up', async () => {
     assert.match(res.body, /<Say/);
     assert.match(res.body, /call 911/i);
     assert.match(res.body, /<Hangup\/>/);
+  } finally {
+    if (prev === undefined) delete process.env.TWILIO_AUTH_TOKEN;
+    else process.env.TWILIO_AUTH_TOKEN = prev;
+  }
+});
+
+test('classifyKeyword matches whole-message keywords only, ignoring case', () => {
+  assert.equal(classifyKeyword('START'), 'START');
+  assert.equal(classifyKeyword('  help '), 'HELP');
+  assert.equal(classifyKeyword('Stop'), 'STOP');
+  assert.equal(classifyKeyword('unsubscribe'), 'STOP');
+  assert.equal(classifyKeyword('info'), 'HELP');
+  assert.equal(classifyKeyword('help my sink is leaking'), null);
+  assert.equal(classifyKeyword('please stop the dripping faucet'), null);
+});
+
+test('classifyKeyword trusts Twilio OptOutType when present', () => {
+  assert.equal(classifyKeyword('SIGNUP', 'START'), 'START');
+  assert.equal(classifyKeyword('ayuda', 'help'), 'HELP');
+});
+
+for (const body of ['START', 'help', 'STOP']) {
+  test(`SMS handler sends no reply and skips triage for keyword ${body}`, async () => {
+    const url = 'https://example.vercel.app/api/twilio/sms';
+    const params = { From: '+17655551234', To: '+17657700925', Body: body, MessageSid: `SMK${body}`, NumMedia: '0' };
+    const prev = process.env.TWILIO_AUTH_TOKEN;
+    process.env.TWILIO_AUTH_TOKEN = AUTH_TOKEN;
+    try {
+      const res = responseSpy();
+      await smsHandler(twilioRequest(url, params), res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['content-type'], 'text/xml; charset=utf-8');
+      assert.match(res.body, /<Response><\/Response>$/);
+      assert.doesNotMatch(res.body, /<Message>/);
+    } finally {
+      if (prev === undefined) delete process.env.TWILIO_AUTH_TOKEN;
+      else process.env.TWILIO_AUTH_TOKEN = prev;
+    }
+  });
+}
+
+test('SMS handler still triages a request that starts with a keyword', async () => {
+  const url = 'https://example.vercel.app/api/twilio/sms';
+  const params = { From: '+17655551234', Body: 'help I smell gas', MessageSid: 'SMK9', NumMedia: '0' };
+  const prev = process.env.TWILIO_AUTH_TOKEN;
+  process.env.TWILIO_AUTH_TOKEN = AUTH_TOKEN;
+  try {
+    const res = responseSpy();
+    await smsHandler(twilioRequest(url, params), res);
+    assert.match(res.body, /immediate safety hazard/i);
   } finally {
     if (prev === undefined) delete process.env.TWILIO_AUTH_TOKEN;
     else process.env.TWILIO_AUTH_TOKEN = prev;

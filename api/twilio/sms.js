@@ -7,6 +7,7 @@ import {
   sendTwiml
 } from '../../src/twilio.js';
 import { classifyMaintenanceRequest } from '../../src/triage.js';
+import { classifyKeyword } from '../../src/keywords.js';
 import { auditEvent } from '../../src/audit.js';
 
 export const config = {
@@ -50,6 +51,14 @@ export default async function handler(req, res) {
   const message = String(params.Body ?? '').trim();
   const conversationId = params.MessageSid ?? null;
   const numMedia = Number(params.NumMedia ?? 0) || 0;
+
+  // STOP/START/HELP are answered by Twilio itself; never triage them and
+  // never send a second reply.
+  const keyword = classifyKeyword(message, params.OptOutType);
+  if (keyword) {
+    auditEvent({ event: 'twilio.keyword', channel: 'sms', conversationId, severity: null, category: keyword, verified: true });
+    return sendTwiml(res, smsTwiml(''));
+  }
 
   if (!message) {
     auditEvent({ event: 'twilio.message', channel: 'sms', conversationId, severity: null, category: null, verified: true });
