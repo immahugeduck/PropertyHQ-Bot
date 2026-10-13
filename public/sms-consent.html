@@ -10,52 +10,46 @@
 <body>
 <header><div><h1>Maintenance Text Message Consent</h1><p>First Call Maintenance</p></div></header>
 <main>
-<p class="updated">Effective and last updated: September 18, 2026</p>
-<p>Use this page to voluntarily opt in to text messages about your maintenance requests. After reviewing the disclosure below, check the consent box and select the button to open your texting app. Send the prefilled word <strong>START</strong> to complete your opt-in.</p>
+<p class="updated">Effective and last updated: October 13, 2026</p>
+<p>To opt in to text messages about your maintenance requests, review the disclosure below, then text the keyword <strong>START</strong> to <strong id="number">our maintenance number</strong> from the mobile phone you want to receive messages. By texting START, you agree to the disclosure below.</p>
 <div class="disclosure">
 <strong>SMS disclosure</strong>
 <p>I agree to receive recurring text messages from First Call Maintenance regarding maintenance requests, including request confirmations, troubleshooting or safety guidance, scheduling information, service status updates, and completion notices.</p>
 <p>Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for help. Consent to SMS messaging is optional and is not required to purchase or receive maintenance service.</p>
 <p><a href="/terms.html">Terms of Service</a> · <a href="/privacy.html">Privacy Policy</a></p>
 </div>
-<label class="check">
-<input id="consent" type="checkbox">
-<span>I have read the disclosure above and affirmatively agree to receive the described maintenance-related text messages from First Call Maintenance.</span>
-</label>
 <a id="start" class="button" href="#" aria-disabled="true">Loading secure opt-in…</a>
 <p id="status" class="status" role="status" aria-live="polite"></p>
-<p class="small">Your opt-in is completed only when you send START. Twilio records the originating mobile number, message, and timestamp. If you do not send the message, you are not enrolled.</p>
+<p class="small">You will receive a confirmation text after you send START. Your opt-in is completed only when you send START. Twilio records the originating mobile number, message, and timestamp. If you do not send the message, you are not enrolled.</p>
 <h2>Need service without text messages?</h2>
 <p>SMS participation is optional. Contact First Call Maintenance through <a href="https://firstcallmaintenance.biz">firstcallmaintenance.biz</a> to request maintenance without enrolling in text messages.</p>
 </main>
 <footer><div>© 2026 First Call Maintenance</div></footer>
 <script>
-const checkbox=document.getElementById('consent');
 const button=document.getElementById('start');
 const status=document.getElementById('status');
-let smsHref='';
-function render(){
- const enabled=checkbox.checked&&smsHref;
- button.setAttribute('aria-disabled',enabled?'false':'true');
- button.textContent=enabled?'Open texting app and send START':(smsHref?'Check the consent box to continue':'SMS opt-in is temporarily unavailable');
+const number=document.getElementById('number');
+function formatUs(e164){
+ const m=/^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164);
+ return m?`(${m[1]}) ${m[2]}-${m[3]}`:e164;
 }
 button.addEventListener('click',event=>{
  if(button.getAttribute('aria-disabled')==='true') event.preventDefault();
 });
-checkbox.addEventListener('change',render);
 fetch('/api/twilio/public-config')
  .then(response=>response.ok?response.json():Promise.reject())
  .then(data=>{
    if(!data.smsNumber) throw new Error();
-   smsHref='sms:'+encodeURIComponent(data.smsNumber)+'?body=START';
-   button.href=smsHref;
+   number.textContent=formatUs(data.smsNumber);
+   button.href='sms:'+encodeURIComponent(data.smsNumber)+'?body=START';
+   button.setAttribute('aria-disabled','false');
+   button.textContent='Text START to '+formatUs(data.smsNumber);
    status.textContent='Ready to opt in with First Call Maintenance.';
    status.className='status ready';
-   render();
  })
  .catch(()=>{
+   button.textContent='SMS opt-in is temporarily unavailable';
    status.textContent='Online SMS enrollment is unavailable. Please contact First Call Maintenance for the correct opt-in number.';
-   render();
  });
 </script>
 </body>
