@@ -1,11 +1,13 @@
+import { normalizePhoneNumber } from '../../src/twilio.js';
+
 export default function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'method_not_allowed' });
   }
 
-  const smsNumber = String(process.env.TWILIO_NUMBER ?? '').trim();
-  if (!/^\+[1-9]\d{7,14}$/.test(smsNumber)) {
+  const smsNumber = normalizePhoneNumber(process.env.TWILIO_NUMBER);
+  if (!smsNumber) {
     return res.status(503).json({ error: 'sms_opt_in_not_configured' });
   }
 
