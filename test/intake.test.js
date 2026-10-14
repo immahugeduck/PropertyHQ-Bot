@@ -12,7 +12,7 @@ const ENV = {
 const SETTINGS = {
   user_id: 'mgr-1',
   twilio_number: '+17657700925',
-  maintenance_phone: '(317) 645-6088',
+  maintenance_phone: '(765) 770-9030',
   manager_phone: '317-645-6088',
   emergency_reply: 'Someone will call you within 30 minutes.'
 };
@@ -99,11 +99,11 @@ test('a known tenant text creates a request, links the message, and alerts maint
   const link = backend.calls.find((c) => c.method === 'PATCH' && c.url.includes('/sms_messages'));
   assert.deepEqual(link.body, { maintenance_request_id: 'req-1' });
 
-  // maintenance_phone and manager_phone are the same number: one text, not two.
+  // Routine alerts go to maintenance only, not the manager line.
   const texts = backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/'));
   assert.equal(texts.length, 1);
   const form = new URLSearchParams(texts[0].body);
-  assert.equal(form.get('To'), '+13176456088');
+  assert.equal(form.get('To'), '+17657709030');
   assert.equal(form.get('From'), '+17657700925');
   assert.match(form.get('Body'), /job #1042/);
   assert.match(form.get('Body'), /Jane Doe @ 12 Elm St/);
@@ -128,10 +128,17 @@ test('an emergency follow-up raises the open request to emergency and alerts', a
 
   const bump = backend.calls.find((c) => c.method === 'PATCH' && c.url.includes('/maintenance_requests'));
   assert.deepEqual(bump.body, { urgency: 'emergency' });
-  assert.ok(backend.calls.some((c) => c.url.startsWith('https://api.twilio.com/')));
+  const texts = backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/'));
+  assert.deepEqual(texts.map((c) => new URLSearchParams(c.body).get('To')), ['+17657709030', '+13176456088']);
   const alertLog = backend.calls.find((c) => c.method === 'POST' && c.url.endsWith('/sms_messages') && c.body.kind === 'emergency_alert');
   assert.ok(alertLog);
   assert.match(decorateReply('Leave now.', result), /Someone will call you within 30 minutes\. Added to your request #1009\.$/);
+});
+
+test('maintenance and manager on the same number get one emergency text, not two', async () => {
+  const backend = fakeBackend({ settings: { ...SETTINGS, manager_phone: '765.770.9030' } });
+  await run('I smell gas', backend);
+  assert.equal(backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/')).length, 1);
 });
 
 test('a Twilio retry of the same MessageSid is detected and does nothing else', async () => {

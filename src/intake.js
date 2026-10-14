@@ -1,7 +1,7 @@
 /**
  * Property HQ intake: files inbound texts/calls as maintenance requests,
- * logs every message to sms_messages, and texts new-request/emergency alerts
- * to the maintenance and manager phones from triage_settings.
+ * logs every message to sms_messages, and texts alerts from triage_settings:
+ * every new request to maintenance_phone, emergencies also to manager_phone.
  *
  * Everything here is best-effort. The webhook handlers call it inside a
  * try/catch and still send the tenant the deterministic triage reply if the
@@ -222,9 +222,10 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
     const via = channel === 'voice' ? 'Call' : 'Text';
     const alertBody = `FCM ${label}${job} - ${via} from ${who} ${fromNumber}: "${truncate(message, 280)}"`;
 
+    // Maintenance gets every alert; the manager line only gets emergencies.
     const recipients = [
       { party: 'maintenance', phone: normalizePhoneNumber(settings.maintenance_phone) },
-      { party: 'manager', phone: normalizePhoneNumber(settings.manager_phone) }
+      ...(isEmergency ? [{ party: 'manager', phone: normalizePhoneNumber(settings.manager_phone) }] : [])
     ].filter((r, i, all) => r.phone && all.findIndex((o) => o.phone === r.phone) === i);
 
     for (const recipient of recipients) {

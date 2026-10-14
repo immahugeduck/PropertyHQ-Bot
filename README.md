@@ -70,7 +70,7 @@ Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `TWILIO_ACCOUNT_SID` (use th
 - log every inbound and outbound message to `sms_messages` (unique `twilio_sid`, so a Twilio retry is detected and ignored);
 - match the sender to a tenant by `tenants.phone_e164` and file a `maintenance_requests` row (`source = 'sms'` or `'voice'`), then add "Your request number is #1042" to the reply;
 - attach follow-up texts within 24 hours to the tenant's open request instead of opening a new one, raising its urgency if the follow-up is an emergency;
-- text a new-request or emergency alert to `maintenance_phone` / `manager_phone`. Texts from numbers not on file are logged and alert maintenance on their first message of the day.
+- text every new-request alert to `maintenance_phone`, and emergencies to `manager_phone` as well. Texts from numbers not on file are logged and alert maintenance on their first message of the day.
 
 All of this is best-effort: if Supabase or the Twilio REST API is down, the tenant still gets the deterministic triage reply. The schema lives in Property HQ (`supabase/migrations/20261014000000_maintenance_triage.sql`). `GET /api/health` reports `propertyHqConfigured`.
 
