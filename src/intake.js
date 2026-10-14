@@ -253,6 +253,11 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
     jobNumber: request?.job_number ?? null,
     isNewRequest,
     tenantMatched: Boolean(tenant),
+    tenantFirstName: tenant?.first_name ?? null,
+    propertyLabel: property
+      ? [property.name, property.address].filter(Boolean).join(' - ') || null
+      : null,
+    isEmergency,
     emergencyReply: isEmergency ? settings.emergency_reply ?? null : null
   };
 }
@@ -275,10 +280,26 @@ export async function recordReply(context, body) {
   }, context.fetchImpl);
 }
 
-/** Add the job number / emergency callback promise to the tenant reply. */
+/**
+ * Personalize the tenant reply: greet a known tenant, stop asking for an
+ * address we already have, acknowledge follow-ups briefly, and add the job
+ * number / emergency callback promise.
+ */
 export function decorateReply(reply, intake) {
   if (!intake || intake.duplicate) return reply;
+
+  // A non-emergency follow-up on an open request ("it's unit 10", "only when
+  // the faucet runs") just needs an acknowledgement, not the intake questions again.
+  if (intake.jobNumber && !intake.isNewRequest && !intake.isEmergency) {
+    const name = intake.tenantFirstName ? `, ${intake.tenantFirstName}` : '';
+    return `Thanks${name}. I added that to your request #${intake.jobNumber}. Maintenance will follow up.`;
+  }
+
   let out = reply;
+  if (intake.propertyLabel) {
+    out = out.replace(/the property address\/unit(, | and )/, '');
+    out = `${intake.tenantFirstName ? `Hi ${intake.tenantFirstName}. ` : ''}${out} We have you at ${intake.propertyLabel}.`;
+  }
   if (intake.emergencyReply) out = `${out} ${intake.emergencyReply}`;
   if (intake.jobNumber) {
     out = intake.isNewRequest
