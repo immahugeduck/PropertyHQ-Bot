@@ -9,6 +9,7 @@ import {
 } from '../../src/twilio.js';
 import { classifyMaintenanceRequest } from '../../src/triage.js';
 import { auditEvent } from '../../src/audit.js';
+import { recordInbound, recordReply, decorateReply } from '../../src/intake.js';
 
 export const config = {
   api: {
@@ -70,10 +71,25 @@ export default async function handler(req, res) {
     verified: true
   });
 
+  // File the request in Property HQ and alert maintenance (best-effort).
+  let intake = null;
+  try {
+    intake = await recordInbound({ params, message: speech, triage, channel: 'voice' });
+  } catch (error) {
+    console.error(JSON.stringify({ type: 'intake_error', error: error.message }));
+  }
+
+  const response = decorateReply(triage.response, intake);
   const closing =
     triage.severity === 'EMERGENCY'
-      ? triage.response
-      : `${triage.response} A member of the maintenance team will follow up. Goodbye.`;
+      ? response
+      : `${response} A member of the maintenance team will follow up. Goodbye.`;
+
+  try {
+    if (intake?.context) await recordReply(intake.context, closing);
+  } catch (error) {
+    console.error(JSON.stringify({ type: 'intake_error', error: error.message }));
+  }
 
   return sendTwiml(res, voiceSayTwiml(closing));
 }

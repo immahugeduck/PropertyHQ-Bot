@@ -9,6 +9,7 @@ import {
 import { classifyMaintenanceRequest } from '../../src/triage.js';
 import { classifyKeyword } from '../../src/keywords.js';
 import { auditEvent } from '../../src/audit.js';
+import { recordInbound, recordReply, decorateReply } from '../../src/intake.js';
 
 export const config = {
   api: {
@@ -79,6 +80,17 @@ export default async function handler(req, res) {
   let reply = triage.response;
   if (numMedia > 0 && triage.severity === 'ROUTINE') {
     reply = `${reply} Thanks for the photo${numMedia > 1 ? 's' : ''}.`;
+  }
+
+  // File the request in Property HQ and alert maintenance. Best-effort: the
+  // tenant always gets the triage reply even if the database is unreachable.
+  let intake = null;
+  try {
+    intake = await recordInbound({ params, message, triage, channel: 'sms' });
+    reply = decorateReply(reply, intake);
+    if (intake?.context) await recordReply(intake.context, reply);
+  } catch (error) {
+    console.error(JSON.stringify({ type: 'intake_error', error: error.message }));
   }
 
   return sendTwiml(res, smsTwiml(reply));
