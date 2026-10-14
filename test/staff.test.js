@@ -210,9 +210,16 @@ test('short commands still act as commands even with a pending question', async 
   assert.ok(!backend.calls.some((c) => c.method === 'POST' && c.body?.kind === 'staff_relay'));
 });
 
-test('"help" always gets the how-to reply', async () => {
+test('"?" always gets the how-to reply', async () => {
   const backend = fakeBackend({ pending: PENDING });
-  const result = await staffText('help', backend);
+  const result = await staffText('?', backend);
   assert.match(result.staffReply, /^To update a job/);
   assert.equal(twilioTexts(backend).length, 0);
+});
+
+test('street numbers and years are not read as job numbers', () => {
+  assert.equal(parseStaffCommand('be at 1234 Main St at 2pm', NOW, TZ).jobNumber, null);
+  assert.equal(parseStaffCommand('done with the 2026 inspection', NOW, TZ).jobNumber, null);
+  assert.equal(parseStaffCommand('job 1003 done', NOW, TZ).jobNumber, 1003);
+  assert.equal(parseStaffCommand('finished #1003', NOW, TZ).jobNumber, 1003);
 });
