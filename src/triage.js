@@ -38,7 +38,12 @@ const RULES = [
       /\b(roof|ceiling)\b.*\bleak(ing)?\b/i,
       /burst (pipe|water line)/i,
       /pipe (burst|broke)/i,
-      /ceiling.*(pouring|gushing)/i
+      /ceiling.*(pouring|gushing)/i,
+      /\b(spray(s|ing)?|squirt(s|ing)?)\b/i,
+      /\bflood(s|ing|ed)?\b/i,
+      /water\b.*\b(everywhere|all over)\b/i,
+      // A leak getting worse: "the water is coming a lot more now"
+      /\b(water|leak(ing)?)\b.*\b(a lot more|more and more|getting worse|worse now|won'?t stop|can'?t stop)\b/i
     ],
     response: 'This appears to be an active major water leak. If you can safely reach the appropriate water shutoff without entering standing water near electrical equipment, shut the water off. Avoid electrical hazards and move away from any sagging ceiling. If there is immediate danger to people, call 911. Maintenance should be escalated immediately.'
   },

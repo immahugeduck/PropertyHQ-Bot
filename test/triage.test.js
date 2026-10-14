@@ -49,3 +49,23 @@ test('general repair defaults to routine', () => {
   assert.equal(result.severity, 'ROUTINE');
   assert.equal(result.category, 'general_maintenance');
 });
+
+test('worsening or spraying water escalates to a major water emergency', () => {
+  for (const text of [
+    "Okay the water is coming a lot more now. It's spraying everywhere",
+    'Water is spraying from under the sink',
+    'The basement is flooding',
+    'There is water all over the kitchen floor',
+    "The leak is getting worse and won't stop"
+  ]) {
+    const result = classifyMaintenanceRequest(text);
+    assert.equal(result.severity, 'EMERGENCY', text);
+    assert.equal(result.category, 'major_water', text);
+  }
+});
+
+test('an ordinary slow leak stays a priority water request', () => {
+  const result = classifyMaintenanceRequest('The bathroom faucet is dripping');
+  assert.equal(result.severity, 'PRIORITY');
+  assert.equal(result.category, 'water_leak');
+});
