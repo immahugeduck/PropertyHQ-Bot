@@ -59,7 +59,7 @@ const SETTINGS = {
 };
 const REQUEST = { id: 'req-3', job_number: 1003, status: 'open', tenant_id: 'ten-1', property_id: 'prop-1' };
 
-function fakeBackend({ request = REQUEST, alerts = [{ maintenance_request_id: 'req-3' }], tenantPhone = '+17652464405' } = {}) {
+function fakeBackend({ request = REQUEST, alerts = [{ maintenance_request_id: 'req-3' }], pending = null, tenantPhone = '+17652464405' } = {}) {
   const calls = [];
   const json = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data), json: async () => data });
   async function fetchImpl(url, init = {}) {
@@ -71,7 +71,9 @@ function fakeBackend({ request = REQUEST, alerts = [{ maintenance_request_id: 'r
     const table = u.pathname.replace('/rest/v1/', '');
     if (table === 'triage_settings') return json(200, [SETTINGS]);
     if (table === 'sms_messages' && method === 'POST') return json(201, [{ id: `msg-${calls.length}` }]);
-    if (table === 'sms_messages' && method === 'GET') return json(200, alerts);
+    if (table === 'sms_messages' && method === 'GET') {
+      return json(200, u.search.includes('reply_to_number') ? (pending ? [pending] : []) : alerts);
+    }
     if (table === 'maintenance_requests' && method === 'GET') return json(200, request ? [request] : []);
     if (table === 'maintenance_requests' && method === 'PATCH') return json(200, [{ ...request, ...body, completed_at: body.status === 'completed' ? '2026-10-14T15:00:00Z' : null }]);
     if (table === 'tenants') return json(200, [{ id: 'ten-1', first_name: 'Claude', last_name: 'Codemaster', phone_e164: tenantPhone }]);
@@ -95,9 +97,9 @@ function staffText(message, backend, from = '+17657709030') {
 const twilioTexts = (backend) =>
   backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/')).map((c) => Object.fromEntries(new URLSearchParams(c.body)));
 
-test('a maintenance reply with a time schedules the last alerted job and texts tenant + manager', async () => {
+test('a short staff reply with a time schedules the last alerted job and texts tenant + manager', async () => {
   const backend = fakeBackend();
-  const result = await staffText('Okay I will be by there at 12:30 to resolve both issues', backend);
+  const result = await staffText('be there at 12:30', backend);
 
   const patch = backend.calls.find((c) => c.method === 'PATCH' && c.url.includes('/maintenance_requests'));
   assert.equal(patch.body.scheduled_at, '2026-10-14T16:30:00.000Z');
@@ -138,7 +140,7 @@ test('the manager texting an update does not text themselves', async () => {
   assert.deepEqual(twilioTexts(backend).map((t) => t.To), ['+17652464405']);
 });
 
-test('a staff text that is not an update gets the how-to reply and changes nothing', async () => {
+test('a staff text that is not an update, with nothing to answer, gets the how-to reply', async () => {
   const backend = fakeBackend();
   const result = await staffText('This is the maintenance number. Are you able to log that or should I hard write that', backend);
   assert.match(result.staffReply, /^To update a job, text the job number/);
@@ -150,5 +152,67 @@ test('an unknown job number is reported back to staff', async () => {
   const backend = fakeBackend({ request: null });
   const result = await staffText('1099 done', backend);
   assert.match(result.staffReply, /^I couldn't find job #1099/);
+  assert.equal(twilioTexts(backend).length, 0);
+});
+
+const PENDING = { reply_to_number: '+17652464405', tenant_id: 'ten-1', maintenance_request_id: 'req-3' };
+
+test('a free-text reply to an alert is relayed word for word to that tenant', async () => {
+  const backend = fakeBackend({ pending: PENDING });
+  const answer = 'The main shutoff is in the basement next to the water heater. Turn the red handle clockwise until it stops.';
+  const result = await staffText(answer, backend);
+
+  const texts = twilioTexts(backend);
+  assert.deepEqual(texts.map((t) => t.To), ['+17652464405']);
+  assert.equal(texts[0].Body, `Maintenance: ${answer}`);
+  const log = backend.calls.find((c) => c.method === 'POST' && c.url.endsWith('/sms_messages') && c.body.kind === 'staff_relay');
+  assert.equal(log.body.party, 'tenant');
+  assert.equal(log.body.maintenance_request_id, 'req-3');
+  assert.ok(!backend.calls.some((c) => c.method === 'PATCH' && c.url.includes('/maintenance_requests')));
+  assert.equal(result.staffReply, 'Sent to Claude Codemaster (job #1003).');
+});
+
+test('a relayed reply that names a time also schedules the job, without a second tenant text', async () => {
+  const backend = fakeBackend({ pending: PENDING });
+  const result = await staffText('Okay I will be by there at 12:30 to resolve both issues', backend);
+
+  const patch = backend.calls.find((c) => c.method === 'PATCH' && c.url.includes('/maintenance_requests'));
+  assert.equal(patch.body.scheduled_at, '2026-10-14T16:30:00.000Z');
+  const texts = twilioTexts(backend);
+  // Tenant gets the tech's own words; the manager line gets the schedule update.
+  assert.deepEqual(texts.map((t) => t.To), ['+17652464405', '+13176456088']);
+  assert.equal(texts[0].Body, 'Maintenance: Okay I will be by there at 12:30 to resolve both issues');
+  assert.match(texts[1].Body, /job #1003 .* scheduled Wed, Oct 14 at 12:30 PM/);
+  assert.equal(result.staffReply, 'Sent to Claude Codemaster (job #1003). Job #1003 scheduled Wed, Oct 14 at 12:30 PM.');
+});
+
+test('a reply to an unknown sender is relayed to their number', async () => {
+  const backend = fakeBackend({ pending: { reply_to_number: '+17655550000', tenant_id: null, maintenance_request_id: null } });
+  const result = await staffText('Which apartment are you in? I can come take a look this afternoon.', backend);
+  const texts = twilioTexts(backend);
+  assert.deepEqual(texts.map((t) => t.To), ['+17655550000']);
+  assert.equal(result.staffReply, 'Sent to +17655550000.');
+});
+
+test('"1003 <message>" sends the message to that job\'s tenant', async () => {
+  const backend = fakeBackend();
+  const result = await staffText('1003 running about 10 minutes late', backend);
+  const texts = twilioTexts(backend);
+  assert.equal(texts[0].To, '+17652464405');
+  assert.equal(texts[0].Body, 'Maintenance: running about 10 minutes late');
+  assert.equal(result.staffReply, 'Sent to Claude Codemaster (job #1003).');
+});
+
+test('short commands still act as commands even with a pending question', async () => {
+  const backend = fakeBackend({ pending: PENDING });
+  const result = await staffText('1003 done', backend);
+  assert.equal(result.staffReply, 'Job #1003 marked complete. Tenant notified.');
+  assert.ok(!backend.calls.some((c) => c.method === 'POST' && c.body?.kind === 'staff_relay'));
+});
+
+test('"help" always gets the how-to reply', async () => {
+  const backend = fakeBackend({ pending: PENDING });
+  const result = await staffText('help', backend);
+  assert.match(result.staffReply, /^To update a job/);
   assert.equal(twilioTexts(backend).length, 0);
 });

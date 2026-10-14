@@ -10,6 +10,7 @@
 import { supabaseConfig, supabaseRequest, eq } from './supabase.js';
 import { normalizePhoneNumber } from './twilio.js';
 import { staffParty, handleStaffMessage } from './staff.js';
+import { isShutoffQuestion } from './triage.js';
 
 const URGENCY_BY_SEVERITY = {
   EMERGENCY: 'emergency',
@@ -241,18 +242,25 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
     alertUnknown = priorRes.ok && Array.isArray(priorRes.data) && priorRes.data.length <= 1;
   }
 
+  const who = tenant
+    ? `${[tenant.first_name, tenant.last_name].filter(Boolean).join(' ')}${property ? ` @ ${property.address || property.name}` : ''}`
+    : 'Unknown number (not on file)';
+  const job = request?.job_number ? ` job #${request.job_number}` : '';
+  // Texts only: a staff reply can be relayed back to a texter, not a caller.
+  const relayable = channel === 'sms';
+  const replyHint = relayable ? ' Reply to this text to answer them.' : '';
+  const question = relayable && isShutoffQuestion(message);
+  const maintenancePhone = normalizePhoneNumber(settings.maintenance_phone);
+  let questionForwarded = false;
+
   if (isNewRequest || isEmergency || escalated || alertUnknown) {
-    const who = tenant
-      ? `${[tenant.first_name, tenant.last_name].filter(Boolean).join(' ')}${property ? ` @ ${property.address || property.name}` : ''}`
-      : 'Unknown number (not on file)';
     const label = isEmergency ? 'EMERGENCY' : triage.severity;
-    const job = request?.job_number ? ` job #${request.job_number}` : '';
     const via = channel === 'voice' ? 'Call' : 'Text';
-    const alertBody = `FCM ${label}${job} - ${via} from ${who} ${fromNumber}: "${truncate(message, 280)}"`;
+    const alertBody = `FCM ${label}${job} - ${via} from ${who} ${fromNumber}: "${truncate(message, 280)}"${replyHint}`;
 
     // Maintenance gets every alert; the manager line only gets emergencies.
     const recipients = [
-      { party: 'maintenance', phone: normalizePhoneNumber(settings.maintenance_phone) },
+      { party: 'maintenance', phone: maintenancePhone },
       ...(isEmergency ? [{ party: 'manager', phone: normalizePhoneNumber(settings.manager_phone) }] : [])
     ].filter((r, i, all) => r.phone && all.findIndex((o) => o.phone === r.phone) === i);
 
@@ -271,12 +279,39 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
         status: sent.status,
         error: sent.error,
         tenant_id: tenant?.id ?? null,
-        maintenance_request_id: request?.id ?? null
+        maintenance_request_id: request?.id ?? null,
+        reply_to_number: relayable ? fromNumber : null
       }, fetchImpl);
+      if (question && recipient.party === 'maintenance' && !sent.error) questionForwarded = true;
     }
   }
 
+  // A shutoff question with no alert going out: forward it to maintenance so
+  // their reply can be relayed back.
+  if (question && !questionForwarded && maintenancePhone) {
+    const forwardBody = `FCM QUESTION${job} - ${who} ${fromNumber}: "${truncate(message, 280)}"${replyHint}`;
+    const sent = await sendSms({ to: maintenancePhone, from: twilioNumber, body: forwardBody, env, fetchImpl });
+    await logMessage(db, {
+      user_id: userId,
+      direction: 'outbound',
+      channel: 'sms',
+      party: 'maintenance',
+      kind: 'tenant_question',
+      from_number: twilioNumber,
+      to_number: maintenancePhone,
+      body: forwardBody,
+      twilio_sid: sent.sid,
+      status: sent.status,
+      error: sent.error,
+      tenant_id: tenant?.id ?? null,
+      maintenance_request_id: request?.id ?? null,
+      reply_to_number: fromNumber
+    }, fetchImpl);
+    questionForwarded = !sent.error;
+  }
+
   return {
+    questionForwarded,
     context,
     jobNumber: request?.job_number ?? null,
     isNewRequest,
@@ -319,9 +354,12 @@ export function decorateReply(reply, intake) {
 
   // A non-emergency follow-up on an open request ("it's unit 10", "only when
   // the faucet runs") just needs an acknowledgement, not the intake questions again.
+  const forwarded = intake.questionForwarded ? " I've sent your question to maintenance; they'll text you back here." : '';
   if (intake.jobNumber && !intake.isNewRequest && !intake.isEmergency) {
     const name = intake.tenantFirstName ? `, ${intake.tenantFirstName}` : '';
-    return `Thanks${name}. I added that to your request #${intake.jobNumber}. Maintenance will follow up.`;
+    return intake.questionForwarded
+      ? `Thanks${name}.${forwarded} It's added to your request #${intake.jobNumber}.`
+      : `Thanks${name}. I added that to your request #${intake.jobNumber}. Maintenance will follow up.`;
   }
 
   let out = reply;
@@ -330,6 +368,7 @@ export function decorateReply(reply, intake) {
     out = `${intake.tenantFirstName ? `Hi ${intake.tenantFirstName}. ` : ''}${out} We have you at ${intake.propertyLabel}.`;
   }
   if (intake.emergencyReply) out = `${out} ${intake.emergencyReply}`;
+  out += forwarded;
   if (intake.jobNumber) {
     out = intake.isNewRequest
       ? `${out} Your request number is #${intake.jobNumber}.`

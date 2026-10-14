@@ -83,6 +83,10 @@ Texts from `maintenance_phone` or `manager_phone` are treated as job updates, ne
 | `1003 done` / `fixed` / `complete` | Marks it completed (trigger stamps `completed_at`); texts the tenant and the manager line, sets `completion_notified_at` |
 | anything else | Replies with a short how-to; nothing changes |
 
+**Answering tenants.** Every alert and forwarded question records who sent it (`sms_messages.reply_to_number`). A longer free-text reply from a staff phone (more than six words, not starting with a job number) goes word for word to the sender of the most recent alert or question sent to that phone in the last 12 hours, as "Maintenance: ...". If that reply also names a time or says the job is done, the job is updated too and the manager line notified; the tenant just gets the tech's own words. `1003 <message>` sends a message to job #1003's tenant directly. Staff always get a confirmation naming who it went to. `help` returns the how-to.
+
+**Shutoff questions.** Water replies tell tenants to shut off the main if they know where it is, and to text back and ask if they don't. A tenant asking where or how to shut the water off is forwarded to `maintenance_phone` (or the question rides on the alert if one is already going out), and the tenant is told maintenance will text back.
+
 Times are read in `triage_settings.timezone`. A bare hour without am/pm is read as working hours (7-11 morning, 12-6 afternoon), and a time already past today with no day given means tomorrow.
 
 All of this is best-effort: if Supabase or the Twilio REST API is down, the tenant still gets the deterministic triage reply. The schema lives in Property HQ (`supabase/migrations/20261014000000_maintenance_triage.sql`). `GET /api/health` reports `propertyHqConfigured`.

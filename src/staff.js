@@ -168,15 +168,77 @@ async function findRequest({ db, userId, jobNumber, fromNumber, fetchImpl }) {
   return null;
 }
 
+// Alerts and forwarded questions stay answerable for this long.
+const RELAY_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+/** The most recent alert/question sent to this staff phone that can be answered. */
+async function findPendingRelay({ db, userId, fromNumber, now, fetchImpl }) {
+  const since = new Date(now.getTime() - RELAY_WINDOW_MS).toISOString();
+  const res = await supabaseRequest(
+    db,
+    `sms_messages?select=reply_to_number,tenant_id,maintenance_request_id&user_id=${eq(userId)}&direction=eq.outbound&to_number=${eq(fromNumber)}&reply_to_number=not.is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1`,
+    { fetchImpl }
+  );
+  return res.ok && Array.isArray(res.data) ? res.data[0] ?? null : null;
+}
+
+async function getRequestById({ db, id, fetchImpl }) {
+  if (!id) return null;
+  const res = await supabaseRequest(db, `maintenance_requests?select=${REQUEST_FIELDS}&id=${eq(id)}&limit=1`, { fetchImpl });
+  return res.ok && Array.isArray(res.data) ? res.data[0] ?? null : null;
+}
+
+async function getTenant({ db, id, fetchImpl }) {
+  if (!id) return null;
+  const res = await supabaseRequest(db, `tenants?select=id,first_name,last_name,phone_e164&id=${eq(id)}&limit=1`, { fetchImpl });
+  return res.ok && Array.isArray(res.data) ? res.data[0] ?? null : null;
+}
+
+const fullName = (tenant) => (tenant ? [tenant.first_name, tenant.last_name].filter(Boolean).join(' ') : '');
+
 /**
  * Handle a text from the maintenance or manager phone. Returns the reply
  * text for the staff member. The inbound message is already logged.
+ *
+ * Short texts or texts starting with a job number are commands ("1003 2pm",
+ * "done"). A longer free-text reply to an alert or forwarded question is
+ * relayed word for word to that tenant, and still schedules or completes the
+ * job if it names a time or says it's done.
  */
 export async function handleStaffMessage({ db, settings, party, message, inboundId, fromNumber, twilioNumber, env, fetchImpl, now }) {
   const userId = settings.user_id;
   const timeZone = settings.timezone || 'America/Indiana/Indianapolis';
-  const command = parseStaffCommand(message, now, timeZone);
-  if (command.action === 'help') return HELP;
+  const text = String(message ?? '').trim();
+  const command = parseStaffCommand(text, now, timeZone);
+  const startsWithJob = /^#?\d{4,6}\b/.test(text);
+  const commandStyle = startsWithJob || text.split(/\s+/).length <= 6;
+  const ctx = { db, settings, userId, timeZone, fromNumber, twilioNumber, env, fetchImpl, now, inboundId };
+  if (/^(help|\?)$/i.test(text)) return HELP;
+
+  // "1003 the shutoff is behind the water heater": message that job's tenant.
+  if (startsWithJob && command.action === 'help') {
+    const request = await findRequest({ db, userId, jobNumber: command.jobNumber, fromNumber, fetchImpl });
+    if (!request) return `I couldn't find job #${command.jobNumber}. ${HELP}`;
+    const tenant = await getTenant({ db, id: request.tenant_id, fetchImpl });
+    if (!tenant?.phone_e164) return `Job #${request.job_number} has no tenant phone on file, so nothing was sent.`;
+    const body = text.replace(/^#?\d{4,6}[\s:,-]*/, '');
+    if (!body) return HELP;
+    return relay(ctx, { to: tenant.phone_e164, tenant, request, body });
+  }
+
+  if (!commandStyle || command.action === 'help') {
+    const pending = await findPendingRelay({ db, userId, fromNumber, now, fetchImpl });
+    if (pending) {
+      const tenant = await getTenant({ db, id: pending.tenant_id, fetchImpl });
+      const request = await getRequestById({ db, id: pending.maintenance_request_id, fetchImpl });
+      let reply = await relay(ctx, { to: pending.reply_to_number, tenant, request, body: text });
+      if (request && command.action !== 'help' && ['open', 'in_progress'].includes(request.status)) {
+        reply += ` ${await applyUpdate(ctx, { request, command, tenant, notifyTenant: false })}`;
+      }
+      return reply;
+    }
+    if (command.action === 'help') return HELP;
+  }
 
   const request = await findRequest({ db, userId, jobNumber: command.jobNumber, fromNumber, fetchImpl });
   if (!request) {
@@ -184,18 +246,53 @@ export async function handleStaffMessage({ db, settings, party, message, inbound
       ? `I couldn't find job #${command.jobNumber}. ${HELP}`
       : `I couldn't tell which job that's for. ${HELP}`;
   }
+  const tenant = await getTenant({ db, id: request.tenant_id, fetchImpl });
+  return applyUpdate(ctx, { request, command, tenant, notifyTenant: true });
+}
+
+/** Send a staff member's words to the tenant and log it. */
+async function relay(ctx, { to, tenant, request, body }) {
+  const { db, userId, twilioNumber, env, fetchImpl, inboundId } = ctx;
+  if (inboundId && request) {
+    await supabaseRequest(db, `sms_messages?id=${eq(inboundId)}`, { method: 'PATCH', body: { maintenance_request_id: request.id }, fetchImpl });
+  }
+  const tenantBody = `Maintenance: ${body}`;
+  const sent = await sendSms({ to, from: twilioNumber, body: tenantBody, env, fetchImpl });
+  await logMessage(db, {
+    user_id: userId,
+    direction: 'outbound',
+    channel: 'sms',
+    party: tenant ? 'tenant' : 'unknown',
+    kind: 'staff_relay',
+    from_number: twilioNumber,
+    to_number: to,
+    body: tenantBody,
+    twilio_sid: sent.sid,
+    status: sent.status,
+    error: sent.error,
+    tenant_id: tenant?.id ?? null,
+    maintenance_request_id: request?.id ?? null
+  }, fetchImpl);
+  const who = fullName(tenant) || to;
+  const job = request?.job_number ? ` (job #${request.job_number})` : '';
+  return sent.error ? `Couldn't send that to ${who}${job}; please contact them directly.` : `Sent to ${who}${job}.`;
+}
+
+/**
+ * Schedule or complete a job. With notifyTenant the tenant gets the standard
+ * notice; without it (the staff's own words were just relayed) only the
+ * manager line is updated.
+ */
+async function applyUpdate(ctx, { request, command, tenant, notifyTenant }) {
+  const { db, settings, userId, timeZone, fromNumber, twilioNumber, env, fetchImpl, now, inboundId } = ctx;
   if (inboundId) {
     await supabaseRequest(db, `sms_messages?id=${eq(inboundId)}`, { method: 'PATCH', body: { maintenance_request_id: request.id }, fetchImpl });
   }
 
-  const tenantRes = request.tenant_id
-    ? await supabaseRequest(db, `tenants?select=id,first_name,last_name,phone_e164&id=${eq(request.tenant_id)}&limit=1`, { fetchImpl })
-    : null;
-  const tenant = tenantRes?.ok && Array.isArray(tenantRes.data) ? tenantRes.data[0] ?? null : null;
   const propRes = await supabaseRequest(db, `properties?select=name,address&id=${eq(request.property_id)}&limit=1`, { fetchImpl });
   const property = propRes.ok && Array.isArray(propRes.data) ? propRes.data[0] ?? null : null;
   const where = property ? property.address || property.name : '';
-  const who = tenant ? [tenant.first_name, tenant.last_name].filter(Boolean).join(' ') : 'no tenant on file';
+  const who = fullName(tenant) || 'no tenant on file';
 
   let tenantText;
   let managerText;
@@ -219,7 +316,7 @@ export async function handleStaffMessage({ db, settings, party, message, inbound
     kind = 'schedule_notice';
     tenantText = `First Call Maintenance: we're scheduled to come out ${when} for your request #${request.job_number}. Reply here if that time doesn't work.`;
     managerText = `FCM update: job #${request.job_number} (${who}${where ? ` @ ${where}` : ''}) scheduled ${when}.`;
-    staffReply = `Got it. Job #${request.job_number} scheduled ${when}.`;
+    staffReply = `Job #${request.job_number} scheduled ${when}.`;
   } else {
     const res = await supabaseRequest(db, `maintenance_requests?id=${eq(request.id)}`, {
       method: 'PATCH',
@@ -236,9 +333,9 @@ export async function handleStaffMessage({ db, settings, party, message, inbound
   }
 
   const notices = [];
-  if (tenant?.phone_e164) notices.push({ party: 'tenant', to: tenant.phone_e164, body: tenantText, tenantId: tenant.id });
+  if (notifyTenant && tenant?.phone_e164) notices.push({ party: 'tenant', to: tenant.phone_e164, body: tenantText });
   const managerPhone = normalizePhoneNumber(settings.manager_phone);
-  if (managerPhone && managerPhone !== fromNumber) notices.push({ party: 'manager', to: managerPhone, body: managerText, tenantId: tenant?.id ?? null });
+  if (managerPhone && managerPhone !== fromNumber) notices.push({ party: 'manager', to: managerPhone, body: managerText });
 
   let tenantNotified = false;
   for (const notice of notices) {
@@ -256,16 +353,19 @@ export async function handleStaffMessage({ db, settings, party, message, inbound
       twilio_sid: sent.sid,
       status: sent.status,
       error: sent.error,
-      tenant_id: notice.tenantId,
+      tenant_id: tenant?.id ?? null,
       maintenance_request_id: request.id,
       completed_at: kind === 'completion_notice' ? completedAt : null
     }, fetchImpl);
   }
 
-  if (kind === 'completion_notice' && tenantNotified) {
+  // The relayed reply counts as telling the tenant.
+  if (kind === 'completion_notice' && (tenantNotified || !notifyTenant)) {
     await supabaseRequest(db, `maintenance_requests?id=${eq(request.id)}`, { method: 'PATCH', body: { completion_notified_at: now.toISOString() }, fetchImpl });
   }
 
+  if (!notifyTenant) return staffReply;
+  if (kind === 'schedule_notice') staffReply = `Got it. ${staffReply}`;
   if (!tenant?.phone_e164) return `${staffReply} No tenant phone on file, so the tenant was not texted.`;
   return tenantNotified ? `${staffReply} Tenant notified.` : `${staffReply} The tenant text failed to send; please contact them directly.`;
 }

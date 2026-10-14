@@ -154,6 +154,41 @@ test('a follow-up that raises urgency alerts maintenance even short of an emerge
   assert.equal(new URLSearchParams(texts[0].body).get('To'), '+17657709030');
 });
 
+test('a shutoff question on an open request is forwarded to maintenance and can be answered', async () => {
+  const backend = fakeBackend({ openRequest: { id: 'req-9', job_number: 1009, urgency: 'high' } });
+  const result = await run('Where is the water shutoff?', backend, { MessageSid: 'SM6' });
+
+  const texts = backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/'));
+  assert.equal(texts.length, 1);
+  const form = new URLSearchParams(texts[0].body);
+  assert.equal(form.get('To'), '+17657709030');
+  assert.match(form.get('Body'), /^FCM QUESTION job #1009 - Jane Doe @ 12 Elm St \+17655551234: "Where is the water shutoff\?" Reply to this text to answer them\.$/);
+  const log = backend.calls.find((c) => c.method === 'POST' && c.url.endsWith('/sms_messages') && c.body.kind === 'tenant_question');
+  assert.equal(log.body.reply_to_number, '+17655551234');
+  assert.equal(
+    decorateReply('ignored', result),
+    "Thanks, Jane. I've sent your question to maintenance; they'll text you back here. It's added to your request #1009."
+  );
+});
+
+test('a shutoff question inside an emergency rides on the alert instead of a second text', async () => {
+  const backend = fakeBackend();
+  const result = await run("Water is spraying everywhere, how do I turn the water off?", backend, { MessageSid: 'SM7' });
+  const texts = backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/'));
+  // One emergency alert each to maintenance and manager; no separate question text.
+  assert.equal(texts.length, 2);
+  assert.match(new URLSearchParams(texts[0].body).get('Body'), /^FCM EMERGENCY job #1042 .* Reply to this text to answer them\.$/);
+  assert.equal(result.questionForwarded, true);
+  assert.match(decorateReply('Shut the main water off.', result), /I've sent your question to maintenance; they'll text you back here\. Your request number is #1042\.$/);
+});
+
+test('every alert records who a staff reply should go back to', async () => {
+  const backend = fakeBackend();
+  await run('The kitchen sink is leaking', backend);
+  const alert = backend.calls.find((c) => c.method === 'POST' && c.url.endsWith('/sms_messages') && c.body.kind === 'new_request_alert');
+  assert.equal(alert.body.reply_to_number, '+17655551234');
+});
+
 test('a Twilio retry of the same MessageSid is detected and does nothing else', async () => {
   const backend = fakeBackend({ duplicate: true });
   const result = await run('The kitchen sink is leaking', backend);
