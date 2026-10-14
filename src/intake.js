@@ -9,6 +9,7 @@
  */
 import { supabaseConfig, supabaseRequest, eq } from './supabase.js';
 import { normalizePhoneNumber } from './twilio.js';
+import { staffParty, handleStaffMessage } from './staff.js';
 
 const URGENCY_BY_SEVERITY = {
   EMERGENCY: 'emergency',
@@ -83,7 +84,7 @@ export async function sendSms({ to, from, body, env = process.env, fetchImpl = g
   }
 }
 
-async function logMessage(db, row, fetchImpl) {
+export async function logMessage(db, row, fetchImpl) {
   return supabaseRequest(db, 'sms_messages', {
     method: 'POST',
     body: row,
@@ -115,6 +116,30 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
     return null;
   }
   const userId = settings.user_id;
+
+  // Texts from the maintenance/manager phones are job updates ("1003 2pm",
+  // "1003 done"), never new tenant requests.
+  const staff = channel === 'sms' ? staffParty(settings, fromNumber) : null;
+  if (staff) {
+    const staffInbound = await logMessage(db, {
+      user_id: userId,
+      direction: 'inbound',
+      channel,
+      party: staff,
+      kind: 'message',
+      from_number: fromNumber,
+      to_number: twilioNumber,
+      body: message,
+      twilio_sid: twilioSid
+    }, fetchImpl);
+    if (staffInbound.status === 409) return { duplicate: true };
+    const inboundId = Array.isArray(staffInbound.data) ? staffInbound.data[0]?.id : null;
+    const staffReply = await handleStaffMessage({ db, settings, party: staff, message, inboundId, fromNumber, twilioNumber, env, fetchImpl, now });
+    return {
+      context: { db, settings, userId, twilioNumber, fromNumber, channel, tenant: null, party: staff, requestId: null, fetchImpl },
+      staffReply
+    };
+  }
 
   const tenantRes = await supabaseRequest(
     db,
@@ -269,7 +294,7 @@ export async function recordReply(context, body) {
     user_id: context.userId,
     direction: 'outbound',
     channel: context.channel,
-    party: context.tenant ? 'tenant' : 'unknown',
+    party: context.party ?? (context.tenant ? 'tenant' : 'unknown'),
     kind: 'message',
     from_number: context.twilioNumber,
     to_number: context.fromNumber,
@@ -287,6 +312,7 @@ export async function recordReply(context, body) {
  */
 export function decorateReply(reply, intake) {
   if (!intake || intake.duplicate) return reply;
+  if (intake.staffReply) return intake.staffReply;
 
   // A non-emergency follow-up on an open request ("it's unit 10", "only when
   // the faucet runs") just needs an acknowledgement, not the intake questions again.

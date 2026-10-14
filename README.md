@@ -72,6 +72,19 @@ Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `TWILIO_ACCOUNT_SID` (use th
 - attach follow-up texts within 24 hours to the tenant's open request instead of opening a new one, raising its urgency if the follow-up is an emergency;
 - text every new-request alert to `maintenance_phone`, and emergencies to `manager_phone` as well. Texts from numbers not on file are logged and alert maintenance on their first message of the day.
 
+### Staff replies
+
+Texts from `maintenance_phone` or `manager_phone` are treated as job updates, never as tenant requests:
+
+| Text | Effect |
+| --- | --- |
+| `1003 tomorrow 2pm`, `1003 fri at 3`, `1003 10/20 8:15am` | Sets `scheduled_at`/`scheduled_date`, status `in_progress`; texts the tenant and the manager line |
+| `be there at 12:30` (no job number) | Same, for the open job most recently alerted to that phone |
+| `1003 done` / `fixed` / `complete` | Marks it completed (trigger stamps `completed_at`); texts the tenant and the manager line, sets `completion_notified_at` |
+| anything else | Replies with a short how-to; nothing changes |
+
+Times are read in `triage_settings.timezone`. A bare hour without am/pm is read as working hours (7-11 morning, 12-6 afternoon), and a time already past today with no day given means tomorrow.
+
 All of this is best-effort: if Supabase or the Twilio REST API is down, the tenant still gets the deterministic triage reply. The schema lives in Property HQ (`supabase/migrations/20261014000000_maintenance_triage.sql`). `GET /api/health` reports `propertyHqConfigured`.
 
 ## Inkbox AI communications agent (email + iMessage)
