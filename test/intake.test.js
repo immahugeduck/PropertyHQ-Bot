@@ -108,7 +108,10 @@ test('a known tenant text creates a request, links the message, and alerts maint
   assert.match(form.get('Body'), /job #1042/);
   assert.match(form.get('Body'), /Jane Doe @ 12 Elm St/);
 
-  assert.equal(decorateReply('Thanks.', result), 'Thanks. Your request number is #1042.');
+  assert.equal(
+    decorateReply('I have this as a water/leak maintenance request. Please send the property address/unit, where the water is coming from.', result),
+    'Hi Jane. I have this as a water/leak maintenance request. Please send where the water is coming from. We have you at Elm Duplex - 12 Elm St. Your request number is #1042.'
+  );
 });
 
 test('a follow-up text attaches to the open request without a new alert', async () => {
@@ -119,7 +122,7 @@ test('a follow-up text attaches to the open request without a new alert', async 
   assert.equal(result.jobNumber, 1009);
   assert.ok(!backend.calls.some((c) => c.method === 'POST' && c.url.endsWith('/maintenance_requests')));
   assert.ok(!backend.calls.some((c) => c.url.startsWith('https://api.twilio.com/')));
-  assert.equal(decorateReply('Thanks.', result), 'Thanks. Added to your request #1009.');
+  assert.equal(decorateReply('Please send the property address/unit.', result), 'Thanks, Jane. I added that to your request #1009. Maintenance will follow up.');
 });
 
 test('an emergency follow-up raises the open request to emergency and alerts', async () => {
@@ -154,6 +157,8 @@ test('an unknown number is logged and alerts maintenance on its first text only'
   const result = await run('My dishwasher is broken', first);
   assert.equal(result.tenantMatched, false);
   assert.equal(result.jobNumber, null);
+  // Unknown sender: keep asking for the address.
+  assert.equal(decorateReply('Please send the property address/unit.', result), 'Please send the property address/unit.');
   const inbound = first.calls.find((c) => c.method === 'POST' && c.url.endsWith('/sms_messages'));
   assert.equal(inbound.body.party, 'unknown');
   const text = first.calls.find((c) => c.url.startsWith('https://api.twilio.com/'));

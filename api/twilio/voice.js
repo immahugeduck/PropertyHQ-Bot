@@ -83,7 +83,9 @@ export default async function handler(req, res) {
   const closing =
     triage.severity === 'EMERGENCY'
       ? response
-      : `${response} A member of the maintenance team will follow up. Goodbye.`;
+      : /will follow up\.$/.test(response)
+        ? `${response} Goodbye.`
+        : `${response} A member of the maintenance team will follow up. Goodbye.`;
 
   try {
     if (intake?.context) await recordReply(intake.context, closing);
