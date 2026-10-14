@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vercel dev",
     "test": "node --test",
-    "check": "node --check api/agentphone/webhook.js && node --check api/twilio/sms.js && node --check api/twilio/voice.js && node --check api/health.js && node --check api/twilio/public-config.js && node --check src/agentphone.js && node --check src/twilio.js && node --check src/keywords.js && node --check src/audit.js && node --check src/triage.js && node --check src/inkbox.js && node --check api/inkbox/imessage.js && node --check src/supabase.js && node --check src/intake.js"
+    "check": "node --check api/agentphone/webhook.js && node --check api/twilio/sms.js && node --check api/twilio/voice.js && node --check api/health.js && node --check api/twilio/public-config.js && node --check src/agentphone.js && node --check src/twilio.js && node --check src/keywords.js && node --check src/audit.js && node --check src/triage.js && node --check src/inkbox.js && node --check api/inkbox/imessage.js && node --check src/supabase.js && node --check src/intake.js && node --check src/staff.js"
   },
   "engines": { "node": ">=20" },
   "devDependencies": {

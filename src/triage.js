@@ -38,9 +38,14 @@ const RULES = [
       /\b(roof|ceiling)\b.*\bleak(ing)?\b/i,
       /burst (pipe|water line)/i,
       /pipe (burst|broke)/i,
-      /ceiling.*(pouring|gushing)/i
+      /ceiling.*(pouring|gushing)/i,
+      /\b(spray(s|ing)?|squirt(s|ing)?)\b/i,
+      /\bflood(s|ing|ed)?\b/i,
+      /water\b.*\b(everywhere|all over)\b/i,
+      // A leak getting worse: "the water is coming a lot more now"
+      /\b(water|leak(ing)?)\b.*\b(a lot more|more and more|getting worse|worse now|won'?t stop|can'?t stop)\b/i
     ],
-    response: 'This appears to be an active major water leak. If you can safely reach the appropriate water shutoff without entering standing water near electrical equipment, shut the water off. Avoid electrical hazards and move away from any sagging ceiling. If there is immediate danger to people, call 911. Maintenance should be escalated immediately.'
+    response: 'This appears to be an active major water leak. If you know where the main water shutoff is and can reach it without stepping into standing water near outlets or electrical equipment, shut the main water off now. If you don\'t know where it is, text back and ask, and we\'ll get you an answer from maintenance. Stay away from any sagging ceiling. If there is immediate danger to people, call 911. Maintenance is being alerted now.'
   },
   {
     severity: 'URGENT',
@@ -58,7 +63,7 @@ const RULES = [
     severity: 'PRIORITY',
     category: 'water_leak',
     patterns: [/leak(ing)?/i, /dripping/i, /water under/i, /wet ceiling/i],
-    response: 'I have this as a water/leak maintenance request. Please send the property address/unit, where the water is coming from, whether it is actively getting worse, and a photo if available.'
+    response: 'I have this as a water/leak maintenance request. Please send the property address/unit, where the water is coming from, whether it is actively getting worse, and a photo if available. If it gets worse and you know where the main water shutoff is, shut it off. If you don\'t know where it is, text back and ask.'
   },
   {
     severity: 'PRIORITY',
@@ -85,3 +90,18 @@ export function classifyMaintenanceRequest(message = '') {
 }
 
 export const severityRank = Object.freeze({ ROUTINE: 1, PRIORITY: 2, URGENT: 3, EMERGENCY: 4 });
+
+/**
+ * A tenant asking how or where to shut the water off. These get forwarded to
+ * maintenance so the answer comes from someone who knows the building.
+ */
+const SHUTOFF_QUESTION = [
+  /\b(where|how)\b.*\b(shut ?off|shut (it|the water|water) off|turn (it|the water|water) off|turn off (the )?water|valve|water main|main water)\b/i,
+  /\b(shut ?off|valve|water main|main water)\b.*\?/i,
+  /\b(don'?t|do not|can'?t|cannot) (know|find)\b.*\b(shut ?off|valve|water main|main water|turn (it|the water) off)\b/i
+];
+
+export function isShutoffQuestion(message = '') {
+  const text = String(message);
+  return SHUTOFF_QUESTION.some((pattern) => pattern.test(text));
+}
