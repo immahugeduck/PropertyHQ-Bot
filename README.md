@@ -50,8 +50,6 @@ Then set `TWILIO_AUTH_TOKEN` in your Vercel project environment variables (Produ
 
 Twilio signs each request with `X-Twilio-Signature` (HMAC-SHA1 over the exact request URL plus the sorted POST parameters). The endpoints reject any request whose signature does not match. If validation fails because the reconstructed URL does not match the host Twilio actually called (custom domain, redirect), set `TWILIO_WEBHOOK_BASE_URL` to the exact base URL Twilio uses (e.g. `https://your-app.vercel.app`).
 
-Before creating real work orders or sending outbound messages, add a persistent idempotency store keyed by `MessageSid`/`CallSid` so a Twilio retry cannot duplicate work.
-
 ### STOP / START / HELP keywords
 
 Twilio replies to these keywords itself and still forwards them to `/api/twilio/sms`. The handler recognizes them (whole-message match, any case, or Twilio's `OptOutType` parameter), logs a `twilio.keyword` audit event, and returns an empty TwiML response, so the customer never gets a second reply and keywords never go through triage.
@@ -63,6 +61,18 @@ To make Twilio's replies match the A2P campaign registration, enable **Advanced 
 | Opt-in (START) | First Call Maintenance: You're enrolled in maintenance text alerts. Msg frequency varies. Msg & data rates may apply. Reply HELP for help, STOP to opt out. |
 | Help (HELP) | First Call Maintenance: For help with a maintenance request, visit firstcallmaintenance.biz. For emergencies call 911. Msg & data rates may apply. Reply STOP to opt out. |
 | Opt-out (STOP) | First Call Maintenance: You're unsubscribed and will receive no further texts. Reply START to resubscribe. |
+
+## Property HQ connection (Supabase)
+
+Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `TWILIO_ACCOUNT_SID` (use the Property HQ Supabase project) and the Twilio SMS/voice handlers also:
+
+- look up the `triage_settings` row whose `twilio_number` is the number that was texted/called, which says which Property HQ account owns it and who gets alerts;
+- log every inbound and outbound message to `sms_messages` (unique `twilio_sid`, so a Twilio retry is detected and ignored);
+- match the sender to a tenant by `tenants.phone_e164` and file a `maintenance_requests` row (`source = 'sms'` or `'voice'`), then add "Your request number is #1042" to the reply;
+- attach follow-up texts within 24 hours to the tenant's open request instead of opening a new one, raising its urgency if the follow-up is an emergency;
+- text a new-request or emergency alert to `maintenance_phone` / `manager_phone`. Texts from numbers not on file are logged and alert maintenance on their first message of the day.
+
+All of this is best-effort: if Supabase or the Twilio REST API is down, the tenant still gets the deterministic triage reply. The schema lives in Property HQ (`supabase/migrations/20261014000000_maintenance_triage.sql`). `GET /api/health` reports `propertyHqConfigured`.
 
 ## Inkbox AI communications agent (email + iMessage)
 

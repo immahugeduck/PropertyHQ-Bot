@@ -13,6 +13,8 @@ export default function handler(req, res) {
     twilioConfigured: Boolean(process.env.TWILIO_AUTH_TOKEN),
     twilioNumberSet: Boolean(String(process.env.TWILIO_NUMBER ?? '').trim()),
     twilioNumberValid: Boolean(normalizePhoneNumber(process.env.TWILIO_NUMBER)),
+    twilioAccountSidSet: Boolean(process.env.TWILIO_ACCOUNT_SID),
+    propertyHqConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
     agentPhoneWebhookConfigured: Boolean(process.env.AGENTPHONE_WEBHOOK_SECRET),
     inkboxWebhookConfigured: Boolean(process.env.INKBOX_WEBHOOK_SECRET)
   });
