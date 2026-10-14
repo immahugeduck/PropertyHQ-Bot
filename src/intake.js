@@ -173,6 +173,7 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
   const isEmergency = triage.severity === 'EMERGENCY';
   let request = null;
   let isNewRequest = false;
+  let escalated = false;
   let property = null;
 
   if (tenant?.property_id) {
@@ -186,6 +187,7 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
 
     if (request) {
       if ((URGENCY_RANK[urgency] ?? 0) > (URGENCY_RANK[request.urgency] ?? 0)) {
+        escalated = true;
         await supabaseRequest(db, `maintenance_requests?id=${eq(request.id)}`, { method: 'PATCH', body: { urgency }, fetchImpl });
       }
     } else {
@@ -224,7 +226,8 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
   }
   context.requestId = request?.id ?? null;
 
-  // Alerts: every new request and every emergency. Unknown numbers alert on
+  // Alerts: every new request, every emergency, and any follow-up that
+  // raises an open request's urgency. Unknown numbers alert on
   // their first message of the day so a tenant whose phone isn't on file
   // still reaches a person without every follow-up text paging someone.
   let alertUnknown = false;
@@ -238,7 +241,7 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
     alertUnknown = priorRes.ok && Array.isArray(priorRes.data) && priorRes.data.length <= 1;
   }
 
-  if (isNewRequest || isEmergency || alertUnknown) {
+  if (isNewRequest || isEmergency || escalated || alertUnknown) {
     const who = tenant
       ? `${[tenant.first_name, tenant.last_name].filter(Boolean).join(' ')}${property ? ` @ ${property.address || property.name}` : ''}`
       : 'Unknown number (not on file)';

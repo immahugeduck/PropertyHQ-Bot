@@ -144,6 +144,16 @@ test('maintenance and manager on the same number get one emergency text, not two
   assert.equal(backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/')).length, 1);
 });
 
+test('a follow-up that raises urgency alerts maintenance even short of an emergency', async () => {
+  const backend = fakeBackend({ openRequest: { id: 'req-9', job_number: 1009, urgency: 'medium' } });
+  await run('Now the outlet is not working either', backend, { MessageSid: 'SM5' });
+  const bump = backend.calls.find((c) => c.method === 'PATCH' && c.url.includes('/maintenance_requests'));
+  assert.deepEqual(bump.body, { urgency: 'high' });
+  const texts = backend.calls.filter((c) => c.url.startsWith('https://api.twilio.com/'));
+  assert.equal(texts.length, 1);
+  assert.equal(new URLSearchParams(texts[0].body).get('To'), '+17657709030');
+});
+
 test('a Twilio retry of the same MessageSid is detected and does nothing else', async () => {
   const backend = fakeBackend({ duplicate: true });
   const result = await run('The kitchen sink is leaking', backend);
