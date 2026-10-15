@@ -15,7 +15,7 @@ import { normalizePhoneNumber } from './twilio.js';
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const COMPLETE_WORDS = /\b(done|complete|completed|finished|fixed|resolved|all set)\b/i;
 const HELP =
-  'To update a job, text the job number and a time or "done". Examples: "1003 tomorrow 2pm", "1003 12:30", "1003 done".';
+  'To update a job, text the job number and a time or "done". Examples: "1003 tomorrow 2pm", "1003 12:30", "1003 done". "1003 <message>" texts that job\'s tenant. Text "?" to see this again.';
 
 /** Calendar date and wall-clock parts of `date` in `timeZone`. */
 function zonedParts(date, timeZone) {
@@ -125,8 +125,10 @@ export function parseScheduleTime(text, now, timeZone) {
 /** Work out what a staff text asks for. */
 export function parseStaffCommand(text, now, timeZone) {
   const body = String(text ?? '');
-  const job = body.match(/#?\b(\d{4,6})\b(?!\s*[:/]|\s*(?:am|pm|a\.m|p\.m))/i);
-  const jobNumber = job ? Number(job[1]) : null;
+  // A job number has to lead the text ("1003 done") or be marked ("#1003",
+  // "job 1003") so street numbers and years ("1234 Main St") aren't mistaken for one.
+  const job = body.match(/^\s*#?(\d{4,6})\b(?!\s*[:/]|\s*(?:am|pm|a\.m|p\.m))|(?:#|\bjob\s*#?)\s*(\d{4,6})\b/i);
+  const jobNumber = job ? Number(job[1] ?? job[2]) : null;
   const scheduledAt = parseScheduleTime(body, now, timeZone);
   if (scheduledAt) return { action: 'schedule', jobNumber, scheduledAt };
   if (COMPLETE_WORDS.test(body)) return { action: 'complete', jobNumber };
@@ -213,7 +215,8 @@ export async function handleStaffMessage({ db, settings, party, message, inbound
   const startsWithJob = /^#?\d{4,6}\b/.test(text);
   const commandStyle = startsWithJob || text.split(/\s+/).length <= 6;
   const ctx = { db, settings, userId, timeZone, fromNumber, twilioNumber, env, fetchImpl, now, inboundId };
-  if (/^(help|\?)$/i.test(text)) return HELP;
+  // "HELP" itself never reaches us: Twilio answers it as an opt-out keyword.
+  if (/^(\?|commands)$/i.test(text)) return HELP;
 
   // "1003 the shutoff is behind the water heater": message that job's tenant.
   if (startsWithJob && command.action === 'help') {
