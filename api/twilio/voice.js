@@ -18,7 +18,7 @@ export const config = {
 };
 
 const GREETING =
-  'Thank you for calling First Call Maintenance. After the tone, briefly describe the maintenance problem, including the property address or unit.';
+  'Hi, I’m Agent HQ with First Call Maintenance. After the tone, tell me about the maintenance problem, including the property address or unit.';
 const REPROMPT =
   'Sorry, I did not catch that. Please call back and describe the maintenance problem after the tone.';
 

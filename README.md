@@ -1,4 +1,4 @@
-# Maintenance Triage Agent
+# Agent HQ
 
 Production-shaped Phase 1 backend for receiving inbound phone/SMS traffic and triaging maintenance requests for First Call Maintenance. **Twilio is the active phone integration.**
 
@@ -95,7 +95,7 @@ All of this is best-effort: if Supabase or the Twilio REST API is down, the tena
 
 This branch adds **Inkbox** as an AI communications channel, separate from the
 Twilio phone integration. The agent runs as an Inkbox identity — agent handle
-`tenant-coms-agent`, display name "Agent-Coms" — and is driven through the
+`tenant-coms-agent`, provider display name "Agent-Coms" (the application now signs replies as Agent HQ) — and is driven through the
 Inkbox MCP tools rather than an inbound HTTP webhook.
 
 Live channels on this identity (from `inkbox_channel_status_get`):
@@ -167,3 +167,28 @@ executed or used to build a request.
 Phase 1 recognizes explicit emergency signals including suspected gas/CO, fire/smoke, electrical arcing/fire, major active flooding, sewage backup with exposure risk, and immediate life-safety hazards. Emergency responses tell the occupant to prioritize personal safety and appropriate emergency/utility services rather than waiting for maintenance.
 
 This software assists maintenance intake; it is not a substitute for emergency services or qualified on-site diagnosis.
+
+## Agent HQ: conversation and schedule memory
+
+Agent HQ is First Call Maintenance’s helpful, organized maintenance assistant.
+See [the conversation guide](docs/AGENT_HQ.md) for tone, workflows, and examples.
+
+Confirmed job appointments stay in Property HQ’s `maintenance_requests.scheduled_at`
+and `scheduled_date`, so they survive restarts and can be recalled in a later text.
+No new database schema is required. Staff can text `When is job 1003 scheduled?`
+or `remind me about job 1003`. A matched tenant can text `When is my appointment?`
+and receives their latest five open requests and saved appointment times.
+Tenant recall is scoped to the matched tenant and owning account. Staff recall
+uses an explicit job number or the previously alerted open job.
+
+`1003 tomorrow 2pm` saves the appointment using the configured timezone and
+notifies the tenant as before. Uncertain or negated updates, time ranges, and
+invalid dates ask for a confirmed day/time instead of changing the appointment.
+A greeting or acknowledgement on the Property HQ path does not open a repair.
+Emergency classification still runs before tenant schedule recall.
+
+This is request-linked schedule memory, not a general calendar or reminder
+service. Saving an appointment does not create an automatic future reminder.
+Inkbox replies use the Agent HQ name but do not have Property HQ schedule recall;
+the existing Twilio SMS/voice intake provides that database integration.
+The Inkbox provider identity and GitHub repository name are unchanged.

@@ -224,3 +224,26 @@ test('the tenant reply is logged against the request', async () => {
   assert.equal(reply.body.to_number, '+17655551234');
   assert.equal(reply.body.maintenance_request_id, 'req-1');
 });
+
+test('tenant appointment recall uses durable, account-scoped records without opening a repair', async () => {
+  const backend = fakeBackend({ openRequest: { id: 'req-1', job_number: 1042, scheduled_at: '2026-10-15T18:00:00Z' } });
+  const result = await run('When is my appointment?', backend);
+  assert.match(decorateReply('ignored', result), /#1042 is scheduled Thu, Oct 15 at 2:00 PM/);
+  const lookup = backend.calls.find(c => c.url.includes('/maintenance_requests'));
+  assert.match(lookup.url, /user_id=eq.mgr-1&tenant_id=eq.ten-1/);
+  assert.ok(!backend.calls.some(c => c.method === 'POST' && c.url.endsWith('/maintenance_requests')));
+});
+
+test('schedule wording cannot hide a newly reported hazard', async () => {
+  const backend = fakeBackend();
+  const result = await run('When will you come? I smell gas', backend);
+  assert.equal(result.isEmergency, true);
+  assert.equal(result.isNewRequest, true);
+});
+
+test('greetings do not create repair tickets', async () => {
+  const backend = fakeBackend();
+  const result = await run('Hello!', backend);
+  assert.match(decorateReply('ignored', result), /Agent HQ/);
+  assert.ok(!backend.calls.some(c => c.method === 'POST' && c.url.endsWith('/maintenance_requests')));
+});

@@ -223,3 +223,21 @@ test('street numbers and years are not read as job numbers', () => {
   assert.equal(parseStaffCommand('job 1003 done', NOW, TZ).jobNumber, 1003);
   assert.equal(parseStaffCommand('finished #1003', NOW, TZ).jobNumber, 1003);
 });
+
+test('Agent HQ recalls a saved appointment without updating or relaying it', async () => {
+  const backend = fakeBackend({ request: { ...REQUEST, scheduled_at: '2026-10-15T18:00:00Z' }, pending: PENDING });
+  const result = await staffText('When is job 1003 scheduled?', backend);
+  assert.match(result.staffReply, /#1003 is scheduled Thu, Oct 15 at 2:00 PM/);
+  assert.equal(twilioTexts(backend).length, 0);
+  assert.ok(!backend.calls.some(c => c.method === 'PATCH'));
+});
+
+test('uncertain, negated, and invalid times do not update a saved appointment', async () => {
+  for (const text of ['1003 maybe tomorrow 2pm', '1003 not done', '1003 tomorrow afternoon', '1003 2/30 2pm', '1003 today 9am']) {
+    const backend = fakeBackend({ pending: PENDING });
+    const result = await staffText(text, backend);
+    assert.match(result.staffReply, /haven’t changed/, text);
+    assert.ok(!backend.calls.some(c => c.method === 'PATCH'), text);
+    assert.equal(twilioTexts(backend).length, 0, text);
+  }
+});
