@@ -9,7 +9,7 @@
  */
 import { supabaseConfig, supabaseRequest, eq } from './supabase.js';
 import { normalizePhoneNumber } from './twilio.js';
-import { staffParty, handleStaffMessage } from './staff.js';
+import { staffParty, handleStaffMessage, formatWhen } from './staff.js';
 import { isShutoffQuestion } from './triage.js';
 
 const URGENCY_BY_SEVERITY = {
@@ -170,6 +170,26 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
   const inboundId = Array.isArray(inboundRes.data) ? inboundRes.data[0]?.id : null;
 
   const context = { db, settings, userId, twilioNumber, fromNumber, channel, tenant, requestId: null, fetchImpl };
+  // Read durable appointments before the new-request path. Never let a schedule
+  // question suppress a newly reported maintenance hazard.
+  if (triage.severity === 'ROUTINE' && /\b(appointment|schedule[ds]?|coming|come|arrive|arrival|visit)\b/i.test(message) && /^(?:(?:hi|hello)[,!. ]+)?(?:when (?:is|are|will)|what time (?:is|are|will)|(?:can you )?(?:check|recall|show|remind me)(?: of| about)? (?:my|the)|(?:my )?(?:schedule|appointment)\s*\??$)/i.test(message.trim())) {
+    let reply = 'I’m Agent HQ with First Call Maintenance. Please send your property address and unit so the team can check your appointment.';
+    if (tenant) {
+      const saved = await supabaseRequest(db, `maintenance_requests?select=id,job_number,status,scheduled_at&user_id=${eq(userId)}&tenant_id=${eq(tenant.id)}&status=in.(open,in_progress)&order=created_at.desc&limit=5`, { fetchImpl });
+      if (!saved.ok) reply = 'I couldn’t check your saved appointment just now. Please try again shortly.';
+      else {
+        const jobs = Array.isArray(saved.data) ? saved.data : [];
+        reply = jobs.length ? jobs.map(job => job.scheduled_at
+          ? `Request #${job.job_number} is scheduled ${formatWhen(new Date(job.scheduled_at), settings.timezone || 'America/Indiana/Indianapolis')}.`
+          : `Request #${job.job_number} has no confirmed appointment saved yet.`).join(' ')
+          : 'I don’t see an open request with a saved appointment. Which repair are you checking on?';
+      }
+    }
+    return { context, staffReply: reply };
+  }
+  if (triage.severity === 'ROUTINE' && /^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(message.trim())) {
+    return { context, staffReply: /thank|ok/i.test(message) ? 'You’re welcome. I’m here if you have another update or need to check an appointment.' : 'Hi, I’m Agent HQ with First Call Maintenance. What can I help you with today—a repair or an existing appointment?' };
+  }
   const urgency = mapUrgency(triage.severity);
   const isEmergency = triage.severity === 'EMERGENCY';
   let request = null;
