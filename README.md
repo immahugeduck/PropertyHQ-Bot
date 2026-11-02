@@ -167,3 +167,63 @@ executed or used to build a request.
 Phase 1 recognizes explicit emergency signals including suspected gas/CO, fire/smoke, electrical arcing/fire, major active flooding, sewage backup with exposure risk, and immediate life-safety hazards. Emergency responses tell the occupant to prioritize personal safety and appropriate emergency/utility services rather than waiting for maintenance.
 
 This software assists maintenance intake; it is not a substitute for emergency services or qualified on-site diagnosis.
+
+## Conversational maintenance coordinator (opt-in)
+
+The SMS coordinator remembers verified contacts and pending name/address answers,
+keeps separate jobs, and lets the tenant select from two or three staff-supplied
+appointment windows. AI interprets intent; application and database code enforce
+staff roles, ownership and appointment transitions. Emergency guidance bypasses AI.
+Existing voice, Inkbox and AgentPhone behavior is preserved.
+
+Implementation/design: `docs/superpowers/specs/2026-11-01-conversation-coordinator-design.md`.
+The coordinator is **disabled by default**. Before a separately authorized pilot:
+
+1. Review and apply PropertyHQ's `20261102000000_conversation_coordinator.sql`
+   migration using the normal database release process. Do not enable the new
+   handler against the old schema. The automated tests use a disposable PGlite
+   database, never the configured Supabase project.
+2. Verify `triage_settings.maintenance_phone` is the full number ending 9030,
+   `manager_phone` ends 6088, and `timezone` is correct. Those are the only staff
+   identities. New requests route to maintenance, emergencies/updates to manager;
+   appointment choices notify both staff. Staff authority comes from verified
+   Twilio sender identity, not AI output or message contents.
+3. Set `COORDINATOR_MODEL` if changing the default and verify OpenAI API/model
+   access. The environment needs HTTPS access to `api.openai.com`; do not assume
+   key presence establishes API access. No live model calls happen in tests.
+4. Set a strong `COORDINATOR_DELIVERY_SECRET` securely. Configure a trusted runner
+   to POST `/api/coordinator/deliver` with `Authorization: Bearer <secret>` at a
+   cadence suitable for timely alerts and drain until `processed` is zero. Each
+   call claims at most two messages. This is mandatory: webhook responses enqueue
+   staff/tenant notifications but do not send them inline. A scheduler has NOT
+   been provisioned automatically. Emergency guidance is immediate; staff alerts
+   depend on a functioning delivery runner. Do not enable without monitoring it.
+5. After review, separately enable `COORDINATOR_ENABLED=true` and
+   `COORDINATOR_OUTBOUND_ENABLED=true`. Enabling flags is NOT deployment or
+   migration. Keep disabled for local simulation.
+
+Example staff messages (include a job number when multiple requests exist):
+
+- `What's scheduled today?` / `Update on job 1003?`
+- `For 1003 offer Tuesday January 8 10–11am or Wednesday January 9 1–2pm`.
+  Include a year or explicit date when ambiguity is possible. The bot asks for
+  clarification instead of inventing a time. Staff reviews the interpreted dates and replies `CONFIRM OPTIONS` to publish them. Tenant replies `1` or `2`, reviews the exact date shown, then replies `CONFIRM` to book. Old or replaced proposals cannot silently book a different time.
+- `1003 work started`, `1003 waiting on a part`, `1003 complete`.
+- Unknown contact approval: inspect the pending name/address against PropertyHQ,
+  then `approve +1... tenant <PropertyHQ tenant UUID>`. A phone/name/address claim
+  alone never discloses the existing tenant's records. To remove a mistaken link,
+  `unlink +1...`. Unlinking preserves history but requires future verification.
+
+The transaction records inbound text, prepared reply and controlled actions.
+Prepared replies and provider-accepted messages are not proof of delivery.
+Outbox states: queued → sending → sent/uncertain; revoked private destinations become cancelled. Timeouts and crashes after claim
+require operator reconciliation against Twilio logs; do not automatically resend
+`sending` or `uncertain` entries. There is no exactly-once guarantee at the carrier.
+Keep provider errors and secrets out of tenant replies. Inspect failed workers and
+queue age, especially for emergencies. Do not bulk-release an old queue after a
+long outage without reviewing its messages and appointment relevance.
+
+`npm test` includes conversation fixtures, cross-role denial, real migration tests,
+idempotency, contact approval and scheduling. `npm run check` checks all JS modules.
+
+AI chooses the conversational intent and one relevant missing-detail question. Record, schedule and delivery confirmations use application-controlled wording so model prose cannot claim an action that failed. Known contacts are not asked for their address.
