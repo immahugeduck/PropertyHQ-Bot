@@ -1,3 +1,4 @@
+import { mergeFacts, inspectionReply } from './intake-details.js';
 import { validOptions, optionText, formatWhen, summarizeJobs } from './appointments.js';
 const staffTypes = new Set(['offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
 const clean = value => typeof value === 'string' ? value.trim().slice(0,1500) : '';
@@ -33,40 +34,53 @@ export function decideConversation({ context: original, intent, safety, now = ne
     if (staff) return result('Please ask the tenant to report the issue, or use PropertyHQ to create it for them.');
     if (!context.identity.propertyId) return result('I need our team to confirm which property belongs to your contact before filing this request.');
     if (!clean(fields.description)) return result(`Hi ${context.identity.name || 'there'}! What’s happening with the maintenance issue?`);
-    return result(`Thanks, ${context.identity.name || 'there'}! I’ve recorded your maintenance request. ${followUp || 'Our team will provide appointment options here.'}`,[{type,fields:{description:clean(fields.description),category:safety?.category || 'general_maintenance'}}]);
+    const facts=mergeFacts({},fields.facts);
+    const reply=Object.keys(facts).length ? inspectionReply({facts,isNew:true,name:context.identity.name,followUp}) : `Thanks, ${context.identity.name || 'there'}! I’ve recorded your maintenance request. ${followUp || 'Our team will provide appointment options here.'}`;
+    return result(reply,[{type,fields:{description:clean(fields.description),category:safety?.category || 'general_maintenance',facts,requestScheduling:true}}]);
   }
   const job = intent?.jobId ? context.jobs.find(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)) : context.jobs.length===1 ? context.jobs[0] : null;
   if (!job) return result(context.jobs.length ? 'Which request is this about? Please include its job number, or tell me it’s a new issue.' : `Hi ${context.identity.name || 'there'}! What maintenance problem can I help with?`);
   nextState.activeJobId=job.id;
   const action = f=>[{type,jobId:job.id,fields:f}];
   if (type==='offer_times' || type==='confirm_options') {
-    if (!validOptions(fields.options,now)) return result('Please send two or three future appointment windows with dates and start/end times.');
+    if (!validOptions(fields.options,now)) return result('Please send one to three future visit options. For broad availability, include the day and available hours.');
     if (type==='offer_times') {
       nextState.pendingOptions={jobId:job.id,options:fields.options};
       return result(`For #${job.job_number}: ${optionText(fields.options,context.settings.timezone)}. Reply CONFIRM OPTIONS to send these to the tenant.`);
     }
     const pending=context.state?.pendingOptions;
-    if (!pending || pending.jobId!==job.id || JSON.stringify(pending.options)!==JSON.stringify(fields.options)) return result('Please provide the appointment options first.');
+    if (!pending || pending.jobId!==job.id || JSON.stringify(pending.options.map(o=>[Date.parse(o.start),Date.parse(o.end),!!o.flexible,o.label||null]))!==JSON.stringify(fields.options.map(o=>[Date.parse(o.start),Date.parse(o.end),!!o.flexible,o.label||null]))) return result('Please provide the appointment options first.');
     delete nextState.pendingOptions;
     return result(`I’ve recorded the options for #${job.job_number}. I’ll send them to the tenant.`,[{type:'offer_times',jobId:job.id,fields:{options:fields.options}}]);
   }
   if (type==='choose_time' || type==='select_time') {
     if (staff) return result('The tenant needs to choose one of the proposed options.');
     if (fields.proposalVersion!==job.proposal_version || !Number.isInteger(fields.choice) || !job.options?.[fields.choice-1] || Date.parse(job.options[fields.choice-1].start)<=+now) return result('That option is no longer available. Please choose from the current proposal or ask for alternatives.');
+    const option=job.options[fields.choice-1];
+    const updates=Object.keys(mergeFacts({},fields.facts)).length ? [{type:'add_details',jobId:job.id,fields:{description:clean(context.inbound),facts:mergeFacts({},fields.facts)}}] : [];
+    const start=fields.appointmentStart || option.start;
+    if (option.flexible && !fields.appointmentStart) return result('What time within that availability window works for you?',updates);
+    if (!Number.isFinite(Date.parse(start))) return result('Please choose a valid time within the offered availability.');
+    const duration=60*60*1000; // Internal capacity reservation, not a promised repair duration.
+    const end=option.flexible ? new Date(Math.min(Date.parse(start)+duration,Date.parse(option.end))).toISOString() : option.end;
+    if (!Number.isFinite(Date.parse(start)) || Date.parse(start)<Date.parse(option.start) || Date.parse(start)>=Date.parse(option.end) || Date.parse(start)<=+now || (!option.flexible && Date.parse(start)!==Date.parse(option.start))) return result('That time is outside the current options. Please choose a listed time or ask for alternatives.');
     if (type==='choose_time') {
-      nextState.pendingSelection={jobId:job.id,choice:fields.choice,proposalVersion:fields.proposalVersion};
-      return result(`You chose ${formatWhen(job.options[fields.choice-1].start,context.settings.timezone)} for #${job.job_number}. Reply CONFIRM to book that time, or ask for other options.`);
+      nextState.pendingSelection={jobId:job.id,choice:fields.choice,proposalVersion:fields.proposalVersion,...(option.flexible?{appointmentStart:start,appointmentEnd:end}:{})};
+      return result(`You chose ${formatWhen(start,context.settings.timezone)} for #${job.job_number}. Reply CONFIRM to book that time, or ask for other options.`,updates);
     }
     const pending=context.state?.pendingSelection;
-    if (!pending || pending.jobId!==job.id || pending.choice!==fields.choice || pending.proposalVersion!==fields.proposalVersion) return result('Please choose a current option first so I can confirm the exact date with you.');
+    if (!pending || pending.jobId!==job.id || pending.choice!==fields.choice || pending.proposalVersion!==fields.proposalVersion || Date.parse(pending.appointmentStart || option.start)!==Date.parse(start)) return result('Please choose a current option first so I can confirm the exact date with you.');
     delete nextState.pendingSelection;
-    return result(`You’re confirmed for ${formatWhen(job.options[fields.choice-1].start,context.settings.timezone)} for #${job.job_number}. We’ll keep you updated here.`,action({choice:fields.choice,proposalVersion:fields.proposalVersion}));
+    return result(`You’re confirmed for ${formatWhen(start,context.settings.timezone)} for #${job.job_number}. We’ll keep you updated here.`,action({choice:fields.choice,proposalVersion:fields.proposalVersion,...(option.flexible?{appointmentStart:start,appointmentEnd:end}:{}),facts:mergeFacts({},fields.facts)}));
   }
   if (type==='request_alternatives') return result('Thanks! I’ll pass your availability to the team for new options.',action({description:clean(fields.description)}));
   if (type==='start_work' || type==='complete_work' || type==='report_progress') {
     if (job.status==='completed' && type!=='complete_work') return result('That job is completed. Please clarify whether a new request is needed.');
     return result(`Recorded for #${job.job_number}. Notifications are queued for the manager and any verified tenant contact.`,action({description:clean(fields.description)}));
   }
-  if (type==='add_details') return result(`Thanks, I’ve added that to #${job.job_number}. ${followUp}`,action({description:clean(fields.description)||clean(context.inbound)}));
+  if (type==='add_details') {
+    const facts=mergeFacts(job.coordinator_details,fields.facts);
+    return result(Object.keys(facts).length ? inspectionReply({facts,scheduled:!!job.scheduled_at,followUp}) : `Thanks, I’ve added that to #${job.job_number}. ${followUp}`,action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts),requestScheduling:!job.scheduled_at}));
+  }
   return result(job.options?.length ? `For #${job.job_number}, which option works for you? ${optionText(job.options,context.settings.timezone)}` : `How can I help with request #${job.job_number}?`);
 }

@@ -227,3 +227,31 @@ long outage without reviewing its messages and appointment relevance.
 idempotency, contact approval and scheduling. `npm run check` checks all JS modules.
 
 AI chooses the conversational intent and one relevant missing-detail question. Record, schedule and delivery confirmations use application-controlled wording so model prose cannot claim an action that failed. Known contacts are not asked for their address.
+
+### Conversation walkthrough refinements
+
+Apply the additive `20261102010000_conversation_flow_refinements.sql` after the
+coordinator migration before enabling the updated handler. It persists job-specific
+availability, entry permission, main-door security and tenant-reported leak pattern.
+An omitted fact keeps its earlier value; an explicit refusal replaces earlier
+entry permission. Staff messages cannot grant entry permission for the tenant.
+
+A washer leak only while running does not trigger the same question again. A
+screen-door report can ask whether the main door still closes and locks, while
+already referring the repair. A suspected disposal/drain leak goes toward inspection
+and scheduling even if nobody is home to check it. The tenant may update the team
+later; diagnosis is never a condition of arranging a visit. Late tenant details go
+to both staff numbers with current visit and entry permission included.
+
+Staff can offer one specific visit or up to three options. Broad options retain
+their label (such as “Wednesday anytime”) and require a specific tenant-selected
+time inside the offered hours. Staff reviews parsed dates with CONFIRM OPTIONS;
+tenant booking still requires CONFIRM of the displayed exact time. Exact visits
+reserve one hour internally for conflict checking; this is not a promised repair
+duration. Broad availability uses configured business hours, with morning ending
+at noon. Missing or ambiguous hours/dates require clarification.
+
+Staff notifications are queued atomically before the webhook acknowledgement;
+actual carrier delivery happens later through the delivery worker. The bot does
+not claim those messages have been delivered. Live model wording/interpretation
+has not been tested against OpenAI; all automated examples use controlled fixtures.

@@ -1,14 +1,15 @@
 export function validOptions(options, now = new Date()) {
-  return Array.isArray(options) && [2,3].includes(options.length) && options.every((o,i) => {
+  return Array.isArray(options) && [1,2,3].includes(options.length) && options.every((o,i) => {
+    if (!o || typeof o !== 'object') return false;
     const start = Date.parse(o.start), end = Date.parse(o.end);
-    return /(?:Z|[+-]\d\d:\d\d)$/.test(o.start) && /(?:Z|[+-]\d\d:\d\d)$/.test(o.end) && start > +now && end > start && end-start <= 8*3600000 && !options.slice(0,i).some(p=>Date.parse(p.start)<end && Date.parse(p.end)>start);
+    return /(?:Z|[+-]\d\d:\d\d)$/.test(o.start) && /(?:Z|[+-]\d\d:\d\d)$/.test(o.end) && start > +now && end > start && end-start <= (o.flexible ? 24 : 8)*3600000 && !options.slice(0,i).some(p=>Date.parse(p.start)<end && Date.parse(p.end)>start);
   });
 }
 export function formatWhen(value, timezone) {
   return new Intl.DateTimeFormat('en-US',{timeZone:timezone || 'America/Indiana/Indianapolis',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value));
 }
 export function optionText(options, timezone) {
-  return options.map((o,i)=>`${i+1}) ${formatWhen(o.start,timezone)} – ${formatWhen(o.end,timezone)}`).join('; ');
+  return options.map((o,i)=>`${i+1}) ${o.flexible && o.label ? o.label : formatWhen(o.start,timezone)}${o.flexible && o.label ? '' : ` – ${formatWhen(o.end,timezone)}`}`).join('; ');
 }
 export function summarizeJobs({context,filter,jobId,now=new Date()}) {
   let jobs=context.jobs;
