@@ -280,3 +280,30 @@ service. Saving an appointment does not create an automatic future reminder.
 Inkbox replies use the Agent HQ name but do not have Property HQ schedule recall;
 the existing Twilio SMS/voice intake provides that database integration.
 The Inkbox provider identity and GitHub repository name are unchanged.
+
+### Free delivery scheduling on Vercel Hobby
+
+Use a free cron-job.org account to run the existing authenticated worker once a
+minute; the bot itself stays on Vercel Hobby. Generate the scheduler API key under
+Settings in https://console.cron-job.org and enter it securely as CRON_JOB_API_KEY
+in the cloud environment. The cloud network policy must allow api.cron-job.org.
+
+`NODE_USE_ENV_PROXY=1 node scripts/provision-delivery-job.mjs --dry-run` shows a
+redacted plan. Without --dry-run, the helper creates or updates a **disabled** job.
+It refuses duplicates and refuses to modify an already enabled worker. It uses
+POST, every-minute scheduling, the existing delivery secret and scheduler failure
+notifications. It does not change the bot's feature flags or enable delivery.
+Never paste secrets into command arguments or source files.
+
+Before enabling that job, deploy and verify the worker's production endpoint,
+set the matching coordinator flags/secrets, verify an authenticated empty-queue
+request and review the prepared pilot. Scheduler timing can drift and messages
+can queue; this is not a guaranteed real-time emergency dispatch service. Existing
+immediate emergency guidance remains independent of AI.
+
+OpenAI key copy/paste whitespace is removed in memory before authentication. Keys
+are never logged or rewritten. The interpreter allows up to six seconds for a
+model response within the service's nine-second deadline; safety replies bypass AI.
+Entry permission is derived from an explicit, unqualified tenant statement or a
+clear answer to the permission question. Nobody being home is not a refusal, and
+conditional/negated permission never grants entry while absent.
