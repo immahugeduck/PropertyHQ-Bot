@@ -117,8 +117,11 @@ export function parseScheduleTime(text, now, timeZone) {
   // "12:30" with no day, sent after 12:30, means tomorrow.
   if (!dayGiven && when.getTime() < now.getTime()) {
     const base = new Date(Date.UTC(year, month - 1, day + 1));
-    when = zonedTimeToDate(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), hour, minute, timeZone);
+    year = base.getUTCFullYear(); month = base.getUTCMonth() + 1; day = base.getUTCDate();
+    when = zonedTimeToDate(year, month, day, hour, minute, timeZone);
   }
+  const actual = zonedParts(when, timeZone);
+  if (actual.year !== year || actual.month !== month || actual.day !== day || actual.hour !== hour || actual.minute !== minute || when < now) return null;
   return when;
 }
 
@@ -129,8 +132,11 @@ export function parseStaffCommand(text, now, timeZone) {
   // "job 1003") so street numbers and years ("1234 Main St") aren't mistaken for one.
   const job = body.match(/^\s*#?(\d{4,6})\b(?!\s*[:/]|\s*(?:am|pm|a\.m|p\.m))|(?:#|\bjob\s*#?)\s*(\d{4,6})\b/i);
   const jobNumber = job ? Number(job[1] ?? job[2]) : null;
+  if (/\b(when|what time|remind me|schedule|scheduled|appointment)\b/i.test(body) && /\?|\b(when|what time|show|recall|remind me)\b/i.test(body)) return { action: 'recall', jobNumber };
+  if (/\bcancel\b|\b(?:not|don’t|don't)\s+(?:done|complete|finished|fixed|resolved)\b/i.test(body) || (/\b(can|could|maybe|might|available|between|after|before|not|don’t|don't)\b|\d\s*(?:am|pm)?\s*[-–]\s*\d/i.test(body) && parseScheduleTime(body, now, timeZone))) return { action: 'clarify', jobNumber };
   const scheduledAt = parseScheduleTime(body, now, timeZone);
   if (scheduledAt) return { action: 'schedule', jobNumber, scheduledAt };
+  if ((jobNumber || body.trim().split(/\s+/).length <= 6) && /\b(tomorrow|today|tonight|morning|afternoon|schedule)\b|\d{1,2}:\d{2}|\d\s*(?:am|pm)\b/i.test(body)) return { action: 'clarify', jobNumber };
   if (COMPLETE_WORDS.test(body)) return { action: 'complete', jobNumber };
   return { action: 'help', jobNumber };
 }
@@ -148,7 +154,7 @@ export function staffParty(settings, phone) {
   return null;
 }
 
-const REQUEST_FIELDS = 'id,job_number,status,tenant_id,property_id';
+const REQUEST_FIELDS = 'id,job_number,status,tenant_id,property_id,scheduled_at,scheduled_date';
 
 async function findRequest({ db, userId, jobNumber, fromNumber, fetchImpl }) {
   if (jobNumber) {
@@ -213,10 +219,17 @@ export async function handleStaffMessage({ db, settings, party, message, inbound
   const text = String(message ?? '').trim();
   const command = parseStaffCommand(text, now, timeZone);
   const startsWithJob = /^#?\d{4,6}\b/.test(text);
-  const commandStyle = startsWithJob || text.split(/\s+/).length <= 6;
+  const commandStyle = Boolean(command.jobNumber) || startsWithJob || text.split(/\s+/).length <= 6;
   const ctx = { db, settings, userId, timeZone, fromNumber, twilioNumber, env, fetchImpl, now, inboundId };
   // "HELP" itself never reaches us: Twilio answers it as an opt-out keyword.
   if (/^(\?|commands)$/i.test(text)) return HELP;
+  if (command.action === 'clarify') return 'I can help with that. Please send the job number and a confirmed day and time, such as "1003 tomorrow 2pm". I haven’t changed the saved appointment.';
+  if (command.action === 'recall') {
+    const request = await findRequest({ db, userId, jobNumber: command.jobNumber, fromNumber, fetchImpl });
+    if (!request) return 'Which job should I check? Send its job number, such as "when is job 1003 scheduled?"';
+    if (!request.scheduled_at) return `Job #${request.job_number} has no confirmed appointment saved yet.`;
+    return `Job #${request.job_number} is scheduled ${formatWhen(new Date(request.scheduled_at), timeZone)} (${timeZone}). Status: ${request.status}.`;
+  }
 
   // "1003 the shutoff is behind the water heater": message that job's tenant.
   if (startsWithJob && command.action === 'help') {

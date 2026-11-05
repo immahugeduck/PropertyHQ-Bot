@@ -45,7 +45,7 @@ const RULES = [
       // A leak getting worse: "the water is coming a lot more now"
       /\b(water|leak(ing)?)\b.*\b(a lot more|more and more|getting worse|worse now|won'?t stop|can'?t stop)\b/i
     ],
-    response: 'This appears to be an active major water leak. If you know where the main water shutoff is and can reach it without stepping into standing water near outlets or electrical equipment, shut the main water off now. If you don\'t know where it is, text back and ask, and we\'ll get you an answer from maintenance. Stay away from any sagging ceiling. If there is immediate danger to people, call 911. Maintenance is being alerted now.'
+    response: 'This appears to be an active major water leak. If you know where the main water shutoff is and can reach it without stepping into standing water near outlets or electrical equipment, shut the main water off now. If you don\'t know where it is, text back and ask, and we\'ll get you an answer from maintenance. Stay away from any sagging ceiling. If there is immediate danger to people, call 911. Please contact maintenance right away.'
   },
   {
     severity: 'URGENT',
@@ -84,7 +84,7 @@ export function classifyMaintenanceRequest(message = '') {
   return {
     severity: 'ROUTINE',
     category: 'general_maintenance',
-    response: 'Thanks for contacting maintenance. Please send the property address/unit, a short description of the problem, when it started, and a photo or video if that would help show the issue.',
+    response: 'I’m Agent HQ with First Call Maintenance. I can help get this repair organized. Please send the property address/unit, a short description of the problem, when it started, and a photo or video if that would help show the issue.',
     matched: false
   };
 }

@@ -35,7 +35,7 @@ const SEVERITY_SUBJECT_TAG = Object.freeze({
   ROUTINE: ''
 });
 
-const SIGNATURE = 'First Call Maintenance';
+const SIGNATURE = 'Agent HQ | First Call Maintenance';
 
 // Quoted-reply markers email clients prepend when a tenant replies. When a
 // webhook or MCP read hands us a full email body, everything from the first of
