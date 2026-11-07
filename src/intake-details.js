@@ -11,7 +11,7 @@ export function mergeFacts(previous = {}, incoming = {}) {
   return facts;
 }
 export function inspectionReply({facts,scheduled=false,isNew=false,name,followUp=''}) {
-  const greeting = isNew ? `Thanks${name ? `, ${name}` : ''}, for letting us know!` : 'Thanks for the update!';
+  const greeting = isNew ? `Thanks for letting me know${name ? `, ${name}` : ''}.` : 'Thanks for the update!';
   const precaution = facts.issue === 'washer' ? ' Please leave the washer off until maintenance checks it.' : facts.issue === 'sink_disposal' ? ' Please avoid using the kitchen sink and disposal until maintenance checks it.' : '';
   if (scheduled) return `${greeting} We’ll keep the scheduled visit.${precaution}`;
   const update = facts.updateWhenHome ? ' Just update us when someone gets home. We’ll arrange an inspection either way.' : '';

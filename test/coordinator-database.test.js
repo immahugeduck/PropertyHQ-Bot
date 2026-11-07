@@ -1,5 +1,6 @@
 import { loadContext, commitDecision } from '../src/conversation-store.js';
 import { coordinateSms } from '../src/conversation-service.js';
+import { interpretMessage } from '../src/assistant.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -21,6 +22,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261102000000_conversation_coordinator.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261102010000_conversation_flow_refinements.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261107000000_workflow_repairs.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261107010000_tenant_conversation_language.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -47,6 +49,10 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await commit(manager,0,[{type:'complete_work',jobId:job,fields:{}}]);
  assert.equal((await ctx(from)).jobs.find(j=>j.id===job).status,'completed');
  assert.equal((await db.query("select count(*)::int n from public.coordinator_outbox where to_number=$1",[from])).rows[0].n,3);
+ const tenantNotices=(await db.query('select body from public.coordinator_outbox where tenant_id=$1',[tenant])).rows;
+ assert.ok(tenantNotices.some(r=>/finished/i.test(r.body)));
+ assert.ok(tenantNotices.every(r=>!/#\d+|request #|Reply CONFIRM/.test(r.body)));
+ assert.ok((await db.query('select body from public.coordinator_outbox where to_number=$1',[manager])).rows.some(r=>/#\d+/.test(r.body)));
  // Unknown contact collection survives independent calls; approval backfills history.
  const unknown='+13175552222';await commit(unknown,0,[],{name:'Sarah'});assert.equal((await ctx(unknown)).state.name,'Sarah');
  await commit(unknown,1,[{type:'request_link_approval',fields:{name:'Sarah',address:'12 Oak'}}],{name:'Sarah',address:'12 Oak'});
@@ -74,7 +80,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  };
  const fixtureDb={url:'https://fixture.invalid',key:'fixture'};
  const run=async(phone,body,intent)=>coordinateSms({params:{From:phone,To:'+13175550000',MessageSid:`SMflow${++seq}`,Body:body},fetchImpl:fetchDb,
-  load:args=>loadContext({...args,db:fixtureDb}),commit:args=>commitDecision({...args,db:fixtureDb}),interpret:async()=>intent});
+  load:args=>loadContext({...args,db:fixtureDb}),commit:args=>commitDecision({...args,db:fixtureDb}),interpret:args=>intent ? Promise.resolve(intent) : interpretMessage({...args,env:{}})});
  const washerReply=await run(from,'Washer leaks only when on. Home until 4; away tomorrow. Permission to enter.',{type:'new_request',fields:{description:'Washer leaks only when turned on',facts:{issue:'washer',leakPattern:'only_when_used',entryPermission:true,availability:'Home until 4; away tomorrow'}}});
  assert.match(washerReply,/washer/i);assert.doesNotMatch(washerReply,/\?/);
  const washer=(await ctx(from)).jobs.find(j=>j.coordinator_details.issue==='washer');
@@ -85,9 +91,10 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const offered=(await ctx(from)).jobs.find(j=>j.id===washer.id);
  assert.ok(offered.options?.length,'staff proposal must be persisted');
  const choiceReply=await run(from,'1',{type:'choose_time',jobId:washer.id,fields:{choice:1,proposalVersion:offered.proposal_version}});
- assert.match(choiceReply,/CONFIRM/);assert.doesNotMatch(choiceReply,/before.*4/);
+ assert.match(choiceReply,/work for you/i);assert.doesNotMatch(choiceReply,/before.*4/);
  const pending=(await ctx(from)).state.pendingSelection;
- await run(from,'CONFIRM',{type:'select_time',jobId:washer.id,fields:pending});
+ assert.equal(pending.jobId,washer.id);
+ const bookedReply=await run(from,'Yes, that works.');assert.match(bookedReply,/scheduled/);
  const booked=(await ctx(from)).jobs.find(j=>j.id===washer.id);
  assert.equal(booked.coordinator_details.entryPermission,true);assert.ok(booked.scheduled_at);
  // Another verified contact's unrelated detail must not restore revoked permission.
@@ -107,6 +114,14 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const formHistory=(await ctx(secondPhone)).messages;assert.ok(formHistory.some(m=>m.jobId===form.id && /permission to enter/i.test(m.reply||'')));assert.equal(formHistory[0].jobId,form.id);assert.match(formHistory[0].reply,/permission to enter/i);
  assert.equal(formRows.length,2);assert.ok(formRows.some(r=>r.to_number===maintenance && /visit options/i.test(r.body)));
  assert.ok(formRows.some(r=>r.to_number===secondPhone && /received your/i.test(r.body)));
+ assert.doesNotMatch(formRows.find(r=>r.to_number===secondPhone).body,/#\d+|request #/);
+ assert.match(formRows.find(r=>r.to_number===maintenance).body,/#\d+/);
+ await commit(maintenance,(await ctx(maintenance)).version,[{type:'report_progress',jobId:form.id,fields:{description:'#'+(await ctx(maintenance)).jobs.find(j=>j.id===form.id).job_number+': Waiting for a replacement screen.'}}],{},'SMprogressLanguage');
+ const progress=(await db.query("select body from public.coordinator_outbox where tenant_id=$1 and event_sid=$2",[tenant,'SMprogressLanguage'])).rows[0].body;
+ assert.match(progress,/replacement screen/);assert.doesNotMatch(progress,/#\d+/);
+ await commit(maintenance,(await ctx(maintenance)).version,[{type:'start_work',jobId:form.id,fields:{}}],{},'SMstartLanguage');
+ const started=(await db.query('select body from public.coordinator_outbox where tenant_id=$1 and event_sid=$2',[tenant,'SMstartLanguage'])).rows[0].body;
+ assert.match(started,/getting started.*window screen/);assert.doesNotMatch(started,/#\d+/);
  await db.query("update public.maintenance_requests set description='Clarified issue' where id=$1",[form.id]);
  assert.equal((await db.query('select count(*)::int n from public.coordinator_outbox where event_sid=$1',['app-maintenance:'+form.id])).rows[0].n,2);
  const beforePrivate=(await db.query('select count(*)::int n from public.coordinator_outbox')).rows[0].n;
