@@ -97,6 +97,16 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const bookedReply=await run(from,'Yes, that works.');assert.match(bookedReply,/scheduled/);
  const booked=(await ctx(from)).jobs.find(j=>j.id===washer.id);
  assert.equal(booked.coordinator_details.entryPermission,true);assert.ok(booked.scheduled_at);
+ // Exact reported regression: initial complaint -> unclear answer -> natural entry consent.
+ await run(from,"Hello I have a kitchen faucet that's leaking underneath the sink. And my garbage disposal doesn't work",{type:'new_request',fields:{description:'Kitchen faucet leaking under sink; disposal not working',facts:{issue:'sink_disposal'}}});
+ const entryJob=(await ctx(from)).jobs.find(j=>j.description==='Kitchen faucet leaking under sink; disposal not working');
+ const requestCount=(await db.query('select count(*)::int n from public.maintenance_requests where user_id=$1',[user])).rows[0].n;
+ const unclear=await run(from,'Maybe, I need to check.');assert.match(unclear,/permission.*enter/i);
+ const entryReply=await run(from,'Yes that is fine with me.');assert.doesNotMatch(entryReply,/permission.*enter|what.*maintenance/i);
+ const entryAfter=(await ctx(from)).jobs.find(j=>j.id===entryJob.id);
+ assert.equal(entryAfter.coordinator_details.entryPermission,true);
+ assert.equal((await db.query('select count(*)::int n from public.maintenance_requests where user_id=$1',[user])).rows[0].n,requestCount);
+ assert.ok((await ctx(from)).messages.some(m=>m.jobId===entryJob.id && m.message==='Yes that is fine with me.'));
  // Another verified contact's unrelated detail must not restore revoked permission.
  await commit(from,(await ctx(from)).version,[{type:'add_details',jobId:washer.id,fields:{description:'Do not enter while I am away',facts:{entryPermission:false}}}]);
  const secondPhone='+13175556666';await db.query('insert into public.coordinator_contacts(user_id,phone,tenant_id) values($1,$2,$3)',[user,secondPhone,tenant]);

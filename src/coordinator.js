@@ -25,6 +25,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     }
     return result('Your contact details are awaiting staff confirmation. I’ll keep your message with this conversation for the team.',[{type:'pending_note',fields:{description:clean(context.inbound)}}]);
   }
+  if(type==='conversation_note') return result('I’ve kept that note with this conversation.');
   if(type==='mock_schedule') return result('Example only — not saved: Monday 9 AM, property check; Tuesday 1 PM, maintenance follow-ups. To add a real staff-only entry, send the task, day and time.');
   if(type==='staff_event') {
     const pending=nextState.pendingStaffEvent || {};
@@ -65,6 +66,12 @@ export function decideConversation({ context: original, intent, safety, now = ne
   if (!job) return result(context.jobs.length ? (staff?'Which request is this about? Please include its job number, or tell me it’s a new issue.':'Which repair are you following up on, or is this something new?') : `Hi ${context.identity.name || 'there'}! What maintenance problem can I help with?`);
   nextState.activeJobId=job.id;
   const action = f=>[{type,jobId:job.id,fields:f}];
+  if(type==='clarify_issue' && !staff) {
+    const facts=mergeFacts({},fields.facts);delete facts.entryPermission;
+    nextState.pendingIssue={jobId:job.id,description:clean(fields.description),facts};
+    return result(`Are you following up on the same repair—the ${repairLabel(job)}?`);
+  }
+  if(type==='clarify_entry' && !staff) return result('I want to make sure I record your entry preference correctly. Does maintenance have permission to enter while nobody is home?',[{type:'add_details',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),requestScheduling:false}}]);
   if (type==='offer_times' || type==='confirm_options') {
     if (!validOptions(fields.options,now)) return result('Please send one to three future visit options. For broad availability, include the day and available hours.');
     if (type==='offer_times') {
@@ -102,6 +109,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(`Recorded for #${job.job_number}. Notifications are queued for the manager and any verified tenant contact.`,action({description:clean(fields.description)}));
   }
   if (type==='add_details') {
+    if(nextState.pendingIssue?.jobId===job.id) delete nextState.pendingIssue;
     const facts=mergeFacts(job.coordinator_details,fields.facts);
     return result(Object.keys(facts).length ? inspectionReply({facts,scheduled:!!job.scheduled_at,followUp}) : `Thanks for the update. I’ll pass that along to maintenance. ${followUp}`,action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts),requestScheduling:!job.scheduled_at}));
   }
