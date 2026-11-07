@@ -331,3 +331,11 @@ is collected conversationally. Entries are stored separately from tenant request
 are visible only to staff, and create no tenant notification. Conflict checks apply
 to the relevant staff calendar and maintenance appointment windows. Calendar entries
 are records, not automatic timed reminders.
+
+## Permission-led scheduling
+
+Calendar suggestions are private to maintenance until staff approve them. New requests acknowledge the issue, say maintenance will reach out to schedule, and ask permission to enter while nobody is home. With permission, staff approve one visit and the tenant receives a booking notice. Without permission, staff approve three options before the tenant chooses and confirms. Unknown permission cannot authorize unattended booking.
+
+Suggestions use configured working days/hours, recorded visits, maintenance calendar blocks and portal bookings; staff can replace them. Proposed internal reservations are one hour, not a promised repair duration. A date-only portal booking occupies that day until a precise time is recorded. The bot searches the next fourteen days with at least one-hour lead time. Approval is bound to the exact displayed proposal and conflicts are rechecked atomically, including portal writes. Private suggestions cannot become tenant options merely by asking for alternatives.
+
+Apply additive migration `20261107030000_permission_led_scheduling.sql` before this version. Previously applied pilot migrations must not be blindly reapplied. This migration does not backfill alerts or book existing requests.

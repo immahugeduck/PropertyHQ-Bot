@@ -1,8 +1,9 @@
+import { decideStaffScheduling } from './staff-scheduling.js';
 import { workingStaffJob } from './staff-context.js';
 import { repairLabel } from './tenant-language.js';
 import { mergeFacts, inspectionReply } from './intake-details.js';
 import { validOptions, optionText, formatWhen, summarizeJobs } from './appointments.js';
-const staffTypes = new Set(['related_jobs','staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
+const staffTypes = new Set(['request_times','approve_suggestions','related_jobs','staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
 const clean = value => typeof value === 'string' ? value.trim().slice(0,1500) : '';
 export function decideConversation({ context: original, intent, safety, now = new Date() }) {
   const staff = ['maintenance','manager'].includes(original.identity.role);
@@ -37,8 +38,8 @@ export function decideConversation({ context: original, intent, safety, now = ne
     const actions=[{type:'add_details',jobId:primary.id,fields:{description:note,requestScheduling:false}}];
     const ack=`I’ve noted that ${related.map(j=>'#'+j.job_number).join(' and ')} describe the same repair for ${primary.tenant_name || 'this tenant'}. For this visit, I’ll use #${primary.job_number}.`;
     if(pending && validOptions(pending.options,now)) {
-      delete nextState.pendingStaffOffer;nextState.pendingOptions={jobId:primary.id,options:pending.options};
-      return result(`${ack} ${optionText(pending.options,context.settings.timezone)}. Shall I send these visit options to the tenant?`,actions);
+      const proposal=decideStaffScheduling({context,job:primary,type:'offer_times',fields:{options:pending.options},nextState,now});
+      return result(`${ack} ${proposal.reply}`,actions);
     }
     return result(`${ack} What visit times are available?`,actions);
   }
@@ -76,7 +77,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     if (!context.identity.propertyId) return result('I need our team to confirm which property belongs to your contact before filing this request.');
     if (!clean(fields.description)) return result(`Hi ${context.identity.name || 'there'}! What’s happening with the maintenance issue?`);
     const facts=mergeFacts({},fields.facts);
-    const reply=Object.keys(facts).length ? inspectionReply({facts,isNew:true,name:context.identity.name,followUp}) : `Thanks${context.identity.name?`, ${context.identity.name}`:''}. I’ll ask maintenance for available visit times. ${followUp}`;
+    const reply=inspectionReply({facts,isNew:true,name:context.identity.name,followUp});
     return result(reply,[{type,fields:{description:clean(fields.description),category:safety?.category || 'general_maintenance',facts,requestScheduling:true}}]);
   }
   const job = staff ? workingStaffJob(context,context.inbound,intent?.jobId) : intent?.jobId ? context.jobs.find(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)) : context.jobs.length===1 ? context.jobs[0] : null;
@@ -93,19 +94,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(`Are you following up on the same repair—the ${repairLabel(job)}?`);
   }
   if(type==='clarify_entry' && !staff) return result('I want to make sure I record your entry preference correctly. Does maintenance have permission to enter while nobody is home?',[{type:'add_details',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),requestScheduling:false}}]);
-  if (type==='offer_times' || type==='confirm_options') {
-    if (!validOptions(fields.options,now)) return result('Please send one to three future visit options. For broad availability, include the day and available hours.');
-    if (type==='offer_times') {
-      if(job.status==='completed') return result('That repair is marked complete. Which open repair should I use for this visit?');
-      delete nextState.pendingStaffOffer;
-      nextState.pendingOptions={jobId:job.id,options:fields.options};
-      return result(`For ${job.tenant_name || 'the tenant'} (#${job.job_number})${job.address?` at ${job.address}`:''}: ${optionText(fields.options,context.settings.timezone)}. Shall I send these visit options to the tenant?`);
-    }
-    const pending=context.state?.pendingOptions;
-    if (!pending || pending.jobId!==job.id || JSON.stringify(pending.options.map(o=>[Date.parse(o.start),Date.parse(o.end),!!o.flexible,o.label||null]))!==JSON.stringify(fields.options.map(o=>[Date.parse(o.start),Date.parse(o.end),!!o.flexible,o.label||null]))) return result('Please provide the appointment options first.');
-    delete nextState.pendingOptions;
-    return result(`I’ve recorded the options for #${job.job_number}. I’ll send them to the tenant.`,[{type:'offer_times',jobId:job.id,fields:{options:fields.options}}]);
-  }
+  if(['offer_times','confirm_options','request_times','approve_suggestions'].includes(type)) return decideStaffScheduling({context,job,type,fields,nextState,now});
   if (type==='choose_time' || type==='select_time') {
     if (staff) return result('The tenant needs to choose one of the proposed options.');
     if (fields.proposalVersion!==job.proposal_version || !Number.isInteger(fields.choice) || !job.options?.[fields.choice-1] || Date.parse(job.options[fields.choice-1].start)<=+now) return result('That option is no longer available. Please choose from the current proposal or ask for alternatives.');

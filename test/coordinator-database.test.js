@@ -24,6 +24,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261107000000_workflow_repairs.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261107010000_tenant_conversation_language.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261107020000_staff_conversation_continuity.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261107030000_permission_led_scheduling.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -37,9 +38,9 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await assert.rejects(commit(from,1,[{type:'complete_work',jobId:job,fields:{}}]),/staff only/);
  const options=[{start:'2035-01-02T15:00:00Z',end:'2035-01-02T16:00:00Z'},{start:'2035-01-03T15:00:00Z',end:'2035-01-03T16:00:00Z'}];
  await commit(maintenance,0,[{type:'offer_times',jobId:job,fields:{options}}]);
- c=await ctx(from);assert.equal(c.jobs[0].proposal_version,1);
- await assert.rejects(commit(from,1,[{type:'select_time',jobId:job,fields:{choice:1,proposalVersion:0}}]),/stale/);
- await commit(from,1,[{type:'select_time',jobId:job,fields:{choice:1,proposalVersion:1}}]);
+ c=await ctx(from);const firstProposal=c.jobs[0].proposal_version;assert.ok(firstProposal>=1);
+ await assert.rejects(commit(from,1,[{type:'select_time',jobId:job,fields:{choice:1,proposalVersion:firstProposal-1}}]),/stale/);
+ await commit(from,1,[{type:'select_time',jobId:job,fields:{choice:1,proposalVersion:firstProposal}}]);
  assert.equal((await ctx(from)).jobs[0].status,'open');
  // A second job cannot claim the same staff window; failed selection rolls back.
  await commit(from,2,[{type:'new_request',fields:{description:'Different issue'}}]);
@@ -69,8 +70,9 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  // Broad staff window accepts explicit in-window selection, never its default start.
  const flexible=[{start:'2035-01-04T14:00:00Z',end:'2035-01-04T23:00:00Z',flexible:true,label:'Thursday anytime'}];
  await commit(maintenance,2,[{type:'offer_times',jobId:second,fields:{options:flexible}}]);
- await assert.rejects(commit(from,4,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:2}}]),/exact time/);
- await commit(from,4,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:2,appointmentStart:'2035-01-04T15:00:00Z',appointmentEnd:'2035-01-04T16:00:00Z'}}]);
+ const flexibleVersion=(await ctx(from)).jobs.find(j=>j.id===second).proposal_version;
+ await assert.rejects(commit(from,4,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:flexibleVersion}}]),/exact time/);
+ await commit(from,4,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:flexibleVersion,appointmentStart:'2035-01-04T15:00:00Z',appointmentEnd:'2035-01-04T16:00:00Z'}}]);
  assert.equal((await ctx(from)).jobs.find(j=>j.id===second).scheduled_at,'2035-01-04T15:00:00+00:00');
  // Real service + RPC boundary walkthrough: washer intake -> single staff offer -> tenant confirmation.
  const fetchDb=async(url,opts)=>{
@@ -88,14 +90,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const visit=[{start:'2035-01-05T20:00:00Z',end:'2035-01-05T21:00:00Z'}];
  await run(maintenance,'Schedule washer at 3pm',{type:'offer_times',jobId:washer.id,fields:{options:visit}});
  const publishReply=await run(maintenance,'CONFIRM OPTIONS',{type:'confirm_options',jobId:washer.id,fields:{options:visit}});
- assert.match(publishReply,/recorded the options/);
- const offered=(await ctx(from)).jobs.find(j=>j.id===washer.id);
- assert.ok(offered.options?.length,'staff proposal must be persisted');
- const choiceReply=await run(from,'1',{type:'choose_time',jobId:washer.id,fields:{choice:1,proposalVersion:offered.proposal_version}});
- assert.match(choiceReply,/work for you/i);assert.doesNotMatch(choiceReply,/before.*4/);
- const pending=(await ctx(from)).state.pendingSelection;
- assert.equal(pending.jobId,washer.id);
- const bookedReply=await run(from,'Yes, that works.');assert.match(bookedReply,/scheduled/);
+ assert.match(publishReply,/scheduled/);
  const booked=(await ctx(from)).jobs.find(j=>j.id===washer.id);
  assert.equal(booked.coordinator_details.entryPermission,true);assert.ok(booked.scheduled_at);
  // Exact reported regression: initial complaint -> unclear answer -> natural entry consent.
@@ -149,13 +144,14 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  // Staff alert -> unnumbered offer -> duplicate clarification -> natural staff confirmation.
  const staffForm=(await db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,source) values($1,$2,$3,'Another report of window screen','Same window issue','app') returning id",[user,property,tenant])).rows[0];
  await db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",['app-maintenance:'+staffForm.id,maintenance]);
- const staffVisit=[{start:'2035-01-15T14:30:00Z',end:'2035-01-15T15:30:00Z'}];
+ await db.query("update public.maintenance_requests set coordinator_details=coordinator_details||'{\"entryPermission\":false}'::jsonb where id=any($1::uuid[])",[[form.id,staffForm.id]]);
+ const staffVisit=[15,16,17].map(day=>({start:`2035-01-${day}T14:30:00Z`,end:`2035-01-${day}T15:30:00Z`}));
  const staffProposal=await run(maintenance,'I can come by at 9:30',{type:'offer_times',fields:{options:staffVisit}});
  assert.match(staffProposal,/Sarah/);assert.equal((await ctx(maintenance)).state.pendingOptions.jobId,staffForm.id);
  const duplicateReply=await run(maintenance,'These describe the same repair',{type:'related_jobs',fields:{jobIds:[form.id,staffForm.id]}});
  assert.match(duplicateReply,/9:30 AM/);assert.doesNotMatch(duplicateReply,/Does maintenance.*permission/);
  const primary=(await ctx(maintenance)).state.pendingOptions.jobId;
- const staffConfirmed=await run(maintenance,'Yes, please.');assert.match(staffConfirmed,/recorded the options/);
+ const staffConfirmed=await run(maintenance,'Yes, please.');assert.match(staffConfirmed,/recorded the three options/);
  assert.equal((await ctx(secondPhone)).jobs.find(j=>j.id===primary).stage,'awaiting_selection');
  // Staff notes update the manager without echoing a second SMS back to maintenance.
  await run(maintenance,'These reports describe the same kitchen repair.',{type:'add_details',jobId:form.id,fields:{description:'Staff fixture note'}});

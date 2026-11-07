@@ -1,4 +1,4 @@
-import { referencedStaffJobs, selectedStaffJob } from './staff-context.js';
+import { referencedStaffJobs, selectedStaffJob, workingStaffJob } from './staff-context.js';
 import { entryConsent, isEntryPermissionQuestion } from './entry-consent.js';
 const TYPES=['collect_contact','request_status','new_request','add_details','offer_times','choose_time','request_alternatives','start_work','report_progress','complete_work','staff_event','clarify'];
 const nullableString={type:['string','null']};
@@ -38,6 +38,14 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
   if(staff && /(?:can|could|may) i add (?:something|an? (?:entry|event)) to my (?:schedule|calendar)/i.test(text)) return {type:'staff_event',fields:{}};
   if(/(?:what|show|check).*(?:schedule|appointments|visits).*(?:next|coming) week/i.test(text)) return {type:'request_status',fields:{filter:'next_week'}};
   const previous=context.messages?.find(m=>typeof m.reply==='string' && m.reply.trim());
+  if(staff && /\b(?:suggest|recommend|available openings|free times)\b/i.test(text)) return {type:'request_times',jobId:workingStaffJob(context,text)?.id,fields:{}};
+  if(staff && /^(?:yes(?:[, ]+please)?|approve|confirm|go ahead)[.! ]*$/i.test(text.trim()) && /(?:Shall I book this visit|Shall I send these three visit options to the tenant)\?$/.test(previous?.reply || '')) {
+    const job=context.jobs.find(j=>j.id===previous?.jobId);
+    if(job?.stage==='awaiting_staff' && /Suggested visit(?: options)?:/i.test(previous?.reply || '')) {
+      const shown=previous?.scheduleProposal;
+      return {type:'approve_suggestions',jobId:job.id,fields:{options:shown?.jobId===job.id?shown.options:[],proposalVersion:shown?.proposalVersion}};
+    }
+  }
   if(staff && /\b(?:same (?:job|repair|request)|duplicates?)\b/i.test(text) && !/\b(?:not|aren['’]?t|isn['’]?t|different|separate|never|maybe|possibly|perhaps|think|might|could)\b|\?/i.test(text)) {
     const refs=referencedStaffJobs(context,text,true),numbers=new Set(text.match(/\b\d{4,}\b/g) || []);
     if(numbers.size>=2) return {type:'related_jobs',fields:{jobIds:refs.length===numbers.size?refs.map(j=>j.id):[]}};
@@ -58,14 +66,14 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
     // An ambiguous answer to our entry question stays a follow-up, never a job.
     if(isEntryPermissionQuestion(previous?.reply) && /^(?:yes|no|sure|okay|ok|maybe|perhaps|only|but)\b/i.test(text.trim()) && !/\b(?:also|another|new|separate)\b/i.test(text)) return {type:'clarify_entry',jobId:entryJob.id,fields:{description:text}};
   }
-  const proposed=jobs.filter(j=>j.options?.length && j.tenant_id===context.identity.tenantId);
+  const proposed=jobs.filter(j=>j.options?.length && j.tenant_id===context.identity.tenantId && (!j.stage || j.stage==='awaiting_selection') && j.status!=='completed');
   if (context.identity.role==='tenant' && /^[123]$/.test(text.trim()) && proposed.length===1) return {type:'choose_time',jobId:proposed[0].id,fields:{choice:Number(text),proposalVersion:proposed[0].proposal_version}};
   const pending=context.state?.pendingSelection;
   const answeringVisit=previous?.reply?.startsWith('Maintenance can come by ') && previous.reply.endsWith('Does that time work for you?') && (!previous.jobId || previous.jobId===pending?.jobId);
   const confirmsVisit=/^confirm(?:ed)?[.!]*$/i.test(text.trim()) || (answeringVisit && /^(?:yes(?:[,.]?\s+(?:please|that works(?: for me)?|that(?:'|’)s fine|that is fine))?|that works(?: for me)?|sounds good)[.!]*$/i.test(text.trim()));
   if (context.identity.role==='tenant' && confirmsVisit && pending) return {type:'select_time',jobId:context.state.pendingSelection.jobId,fields:{choice:context.state.pendingSelection.choice,proposalVersion:context.state.pendingSelection.proposalVersion,appointmentStart:context.state.pendingSelection.appointmentStart}};
   if (['manager','maintenance'].includes(context.identity.role)) {
-    if ((/^confirm options$/i.test(text.trim()) || (previous?.reply?.endsWith('Shall I send these visit options to the tenant?') && (!previous.jobId || previous.jobId===context.state?.pendingOptions?.jobId) && /^(?:yes(?:[, ]+please)?|confirm|send (?:it|them)|go ahead)[.! ]*$/i.test(text.trim()))) && context.state?.pendingOptions) return {type:'confirm_options',jobId:context.state.pendingOptions.jobId,fields:{options:context.state.pendingOptions.options}};
+    if ((/^confirm options$/i.test(text.trim()) || (/(?:Shall I send these (?:three )?visit options to the tenant|Shall I book this visit)\?$/.test(previous?.reply || '') && (!previous.jobId || previous.jobId===context.state?.pendingOptions?.jobId) && /^(?:yes(?:[, ]+please)?|confirm|send (?:it|them)|go ahead)[.! ]*$/i.test(text.trim()))) && context.state?.pendingOptions) return {type:'confirm_options',jobId:context.state.pendingOptions.jobId,fields:{options:context.state.pendingOptions.options}};
     const approval=text.match(/^approve\s+(\+\d{8,15})\s+tenant\s+([0-9a-f-]{36})$/i);
     if (approval) return {type:'approve_contact',fields:{phone:approval[1],tenantId:approval[2]}};
     const unlink=text.match(/^unlink\s+(\+\d{8,15})$/i);

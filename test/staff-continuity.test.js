@@ -38,9 +38,9 @@ test('duplicate-job clarification retains pending availability and proposes one 
  assert.ok(d.actions.every(a=>a.type==='add_details'));
 });
 test('a natural staff yes confirms only the options just displayed, without changing tenant consent',async()=>{
- const c=base();c.state.pendingOptions={jobId:'one',options};c.messages=[{reply:'For Randy: Monday at 9:30 AM. Shall I send these visit options to the tenant?',jobId:'one'}];
+ const c=base();c.jobs[0].coordinator_details.entryPermission=true;c.state.pendingOptions={jobId:'one',options,entryPermission:true};c.messages=[{reply:'For Randy: Monday at 9:30 AM. Shall I send these visit options to the tenant?',jobId:'one'}];
  const i=await interpretMessage({context:c,text:'Yes, please.',env:{}});const d=decide(c,i);
- assert.equal(d.actions[0]?.type,'offer_times');assert.equal(d.actions[0].jobId,'one');assert.equal(d.actions[0].fields.facts,undefined);
+ assert.equal(d.actions[0]?.type,'book_visit');assert.equal(d.actions[0].jobId,'one');assert.equal(d.actions[0].fields.facts,undefined);
  c.messages=[{reply:'Did the supplier call you?',jobId:'one'}];assert.notEqual((await interpretMessage({context:c,text:'Yes',env:{}})).type,'confirm_options');
 });
 test('staff cannot attach an offer to an absent job from history',()=>{
