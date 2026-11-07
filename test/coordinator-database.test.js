@@ -20,6 +20,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261014000000_maintenance_triage.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261102000000_conversation_coordinator.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261102010000_conversation_flow_refinements.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261107000000_workflow_repairs.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -99,6 +100,26 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const claimed=await db.query('select * from public.coordinator_claim_outbox($1)',[user]);assert.equal(claimed.rows.length,2);assert.equal(claimed.rows.some(r=>r.to_number===from),false);
  const again=await db.query('select * from public.coordinator_claim_outbox($1)',[user]);assert.equal(again.rows.some(x=>claimed.rows.some(y=>y.id===x.id)),false);
  await db.query("insert into public.maintenance_requests(user_id,property_id,title,description) values($1,$2,'Foreign','Private') returning id",[other,property]).then(async r=>{await assert.rejects(commit(manager,4,[{type:'complete_work',jobId:r.rows[0].id,fields:{}}]),/no rows/);});
+ // Form submission atomically queues the staff alert and verified-tenant acknowledgement.
+ const form=(await db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,source) values($1,$2,$3,'Kitchen window screen','Window screen needs repair','app') returning id",[user,property,tenant])).rows[0];
+ const formRows=(await db.query("select to_number,body from public.coordinator_outbox where event_sid=$1",['app-maintenance:'+form.id])).rows;
+ await db.query("update public.coordinator_outbox set status='sent' where event_sid=$1",['app-maintenance:'+form.id]);
+ const formHistory=(await ctx(secondPhone)).messages;assert.ok(formHistory.some(m=>m.jobId===form.id && /permission to enter/i.test(m.reply||'')));assert.equal(formHistory[0].jobId,form.id);assert.match(formHistory[0].reply,/permission to enter/i);
+ assert.equal(formRows.length,2);assert.ok(formRows.some(r=>r.to_number===maintenance && /visit options/i.test(r.body)));
+ assert.ok(formRows.some(r=>r.to_number===secondPhone && /received your/i.test(r.body)));
+ await db.query("update public.maintenance_requests set description='Clarified issue' where id=$1",[form.id]);
+ assert.equal((await db.query('select count(*)::int n from public.coordinator_outbox where event_sid=$1',['app-maintenance:'+form.id])).rows[0].n,2);
+ const beforePrivate=(await db.query('select count(*)::int n from public.coordinator_outbox')).rows[0].n;
+ await commit(manager,4,[{type:'staff_event',fields:{eventTitle:'Supply pickup',appointmentStart:'2035-01-10T15:00:00Z',appointmentEnd:'2035-01-10T16:00:00Z'}}]);
+ await db.query("insert into public.coordinator_staff_events(user_id,staff_phone,title,start_at,end_at) select $1,$2,'Historical event',timestamp with time zone '2020-01-01 10:00Z'+i*interval '1 day',timestamp with time zone '2020-01-01 11:00Z'+i*interval '1 day' from generate_series(1,101)i",[user,manager]);
+ assert.equal((await ctx(manager)).staffEvents.length,1);assert.equal((await ctx(secondPhone)).staffEvents.length,0);
+ assert.equal((await db.query('select count(*)::int n from public.coordinator_outbox')).rows[0].n,beforePrivate);
+ await assert.rejects(commit(secondPhone,(await ctx(secondPhone)).version,[{type:'staff_event',fields:{eventTitle:'No',appointmentStart:'2035-01-11T15:00:00Z',appointmentEnd:'2035-01-11T16:00:00Z'}}]),/staff only/);
+ await assert.rejects(commit(manager,5,[{type:'staff_event',fields:{eventTitle:'Conflicting pickup',appointmentStart:'2035-01-10T15:30:00Z',appointmentEnd:'2035-01-10T16:30:00Z'}}]),/conflict/);
+ const requestVersion=(await ctx(secondPhone)).version;
+ for(let i=0;i<2;i++) await commit(secondPhone,requestVersion+i,[{type:'request_scheduling',jobId:form.id,fields:{description:'Can we get this week?'}}]);
+ assert.equal((await db.query("select count(*)::int n from public.coordinator_outbox where request_id=$1 and action_key='scheduling_followup'",[form.id])).rows[0].n,1);
+ assert.ok((await ctx(secondPhone)).jobs.every(j=>j.notes==null));
  await db.exec('set role anon');await assert.rejects(db.query('select public.coordinator_context($1,$2)',['+13175550000',from]),/permission denied/);await db.exec('reset role');
  } finally {await db.close();}
 });

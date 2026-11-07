@@ -2,7 +2,7 @@
 // earlier consent or certainty merely because a later text omits it.
 export function mergeFacts(previous = {}, incoming = {}) {
   const facts = { ...previous };
-  if (['washer','screen_door','sink_disposal','other'].includes(incoming?.issue)) facts.issue = incoming.issue;
+  if (['washer','screen_door','window_screen','sink_disposal','other'].includes(incoming?.issue)) facts.issue = incoming.issue;
   if (['only_when_used','continuous','uncertain','none'].includes(incoming?.leakPattern)) facts.leakPattern = incoming.leakPattern;
   for (const key of ['entryPermission','mainDoorSecure','updateWhenHome']) {
     if (typeof incoming?.[key] === 'boolean') facts[key] = incoming[key];
@@ -20,6 +20,6 @@ export function inspectionReply({facts,scheduled=false,isNew=false,name,followUp
   if (facts.issue === 'screen_door' && facts.mainDoorSecure === undefined) return `${greeting}${scheduling} Is the main entry door still closing and locking securely?`;
   const entry = facts.entryPermission === undefined && facts.issue !== 'screen_door' ? ' Does maintenance have permission to enter if nobody’s home?' : '';
   // Do not turn an appliance/drain report into a tenant diagnostic interview.
-  const question = !['washer','screen_door','sink_disposal'].includes(facts.issue) && !entry && followUp ? ` ${followUp}` : '';
+  const question = !['washer','screen_door','window_screen','sink_disposal'].includes(facts.issue) && !entry && followUp ? ` ${followUp}` : '';
   return `${greeting}${update}${scheduling}${entry}${precaution}${question}`;
 }

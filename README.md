@@ -307,3 +307,27 @@ model response within the service's nine-second deadline; safety replies bypass 
 Entry permission is derived from an explicit, unqualified tenant statement or a
 clear answer to the permission question. Nobody being home is not a refusal, and
 conditional/negated permission never grants entry while absent.
+
+### Form intake and role-aware scheduling repair
+
+Apply `20261107000000_workflow_repairs.sql` after the two coordinator migrations.
+It bridges future `source=app` inserts to the same account-scoped notification
+outbox, with one staff alert and a verified-tenant acknowledgement. SMS/voice
+inserts are excluded to prevent duplicates. Updates do not replay initial alerts;
+accounts without routing never fall back to another owner's staff. No historical
+requests are backfilled. Bot questions and delivered outbound messages retain their
+job association so a reply such as “Yes” applies to the right permission question.
+
+Tenant status replies use plain language and never include staff notes or the
+staff report layout. An unbooked request can ask maintenance for availability;
+repeat scheduling pings are deduplicated per request/day and existing valid options
+are shown instead of requesting new ones. Staff queries distinguish this week,
+next week, confirmed visits, and requests still waiting for a time. Mock schedules
+are labeled as unsaved examples, never presented as real bookings.
+
+Both configured staff phones can add staff-only calendar entries. Example:
+“Add supply pickup next Tuesday at 10 AM; no tenant message.” Missing task/time
+is collected conversationally. Entries are stored separately from tenant requests,
+are visible only to staff, and create no tenant notification. Conflict checks apply
+to the relevant staff calendar and maintenance appointment windows. Calendar entries
+are records, not automatic timed reminders.

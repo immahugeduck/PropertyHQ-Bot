@@ -1,6 +1,6 @@
 import { mergeFacts, inspectionReply } from './intake-details.js';
 import { validOptions, optionText, formatWhen, summarizeJobs } from './appointments.js';
-const staffTypes = new Set(['offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
+const staffTypes = new Set(['staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
 const clean = value => typeof value === 'string' ? value.trim().slice(0,1500) : '';
 export function decideConversation({ context: original, intent, safety, now = new Date() }) {
   const staff = ['maintenance','manager'].includes(original.identity.role);
@@ -24,7 +24,29 @@ export function decideConversation({ context: original, intent, safety, now = ne
     }
     return result('Your contact details are awaiting staff confirmation. I’ll keep your message with this conversation for the team.',[{type:'pending_note',fields:{description:clean(context.inbound)}}]);
   }
-  if (type==='request_status') return result(summarizeJobs({context,filter:fields.filter,jobId:intent.jobId,now}));
+  if(type==='mock_schedule') return result('Example only — not saved: Monday 9 AM, property check; Tuesday 1 PM, maintenance follow-ups. To add a real staff-only entry, send the task, day and time.');
+  if(type==='staff_event') {
+    const pending=nextState.pendingStaffEvent || {};
+    const title=clean(fields.eventTitle) || pending.title;
+    const start=fields.appointmentStart || pending.start;
+    nextState.pendingStaffEvent={...(title?{title}:{}),...(start?{start}:{})};
+    if(!title) return result('Of course—what would you like to add, and when? I’ll keep it staff-only.');
+    if(!start) return result(`When should I put “${title}” on the staff calendar?`);
+    const startMs=Date.parse(start),endMs=fields.appointmentEnd?Date.parse(fields.appointmentEnd):startMs+3600000;
+    if(!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs<=+now || endMs<=startMs || endMs-startMs>86400000 || !/(?:Z|[+-]\d\d:\d\d)$/.test(start)) return result('Please give me a future day and time for that entry.');
+    delete nextState.pendingStaffEvent;
+    return result(`Added “${title}” to the staff calendar for ${formatWhen(start,context.settings.timezone)}. No tenant will be notified.`,[{type:'staff_event',fields:{eventTitle:title,appointmentStart:new Date(startMs).toISOString(),appointmentEnd:new Date(endMs).toISOString()}}]);
+  }
+  if(type==='request_status') {
+    const matching=intent.jobId?context.jobs.filter(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)):context.jobs;
+    const open=matching.filter(j=>j.status!=='completed');
+    if(!staff && open.length===1 && !open[0].scheduled_at) {
+      const job=open[0];nextState.activeJobId=job.id;
+      if(job.stage==='awaiting_selection' && job.options?.some(o=>Date.parse(o.flexible?o.end:o.start)>+now)) return result(`Maintenance has offered these times for your ${job.title.toLowerCase()} request (#${job.job_number}): ${optionText(job.options,context.settings.timezone)}. Which option works for you?`);
+      return result(`Thanks for checking in${context.identity.name?`, ${context.identity.name}`:''}. Your ${(job.title || 'maintenance').toLowerCase()} request (#${job.job_number}) hasn’t been booked yet. I’ll ask maintenance for available visit times.`,[{type:'request_scheduling',jobId:job.id,fields:{description:clean(context.inbound)||'Tenant requested available visit times.'}}]);
+    }
+    return result(summarizeJobs({context,filter:fields.filter,jobId:intent.jobId,now}));
+  }
   if (type==='approve_contact' || type==='unlink_contact') {
     if (!/^\+[1-9]\d{7,14}$/.test(fields.phone||'') || (type==='approve_contact' && !clean(fields.tenantId))) return result('Please provide the pending phone number and PropertyHQ tenant ID to approve the link.');
     return result(type==='approve_contact'?'Contact link recorded. Future messages will use that tenant’s property.':'Contact link removed. Future messages will require verification.',[{type,fields:{phone:fields.phone,tenantId:fields.tenantId || null}}]);
