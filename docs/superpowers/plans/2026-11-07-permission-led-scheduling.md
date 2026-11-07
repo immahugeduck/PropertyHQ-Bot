@@ -41,5 +41,5 @@
 **Files:** Tests above, documentation and operator ledger.
 - [x] Run full bot tests and syntax checks, PropertyHQ tests, and diff checks.
 - [x] Obtain independent review, address significant findings, rerun affected/full checks.
-- [ ] Commit and push source; apply additive migration with history; deploy to the authorized live pilot.
-- [ ] Verify production health and worker status without sending test messages or backfilling alerts.
+- [x] Commit and push source; apply additive migration with history; deploy to the authorized live pilot.
+- [x] Verify production health and worker status without sending test messages or backfilling alerts.
