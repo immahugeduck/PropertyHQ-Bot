@@ -1,7 +1,8 @@
+import { workingStaffJob } from './staff-context.js';
 import { repairLabel } from './tenant-language.js';
 import { mergeFacts, inspectionReply } from './intake-details.js';
 import { validOptions, optionText, formatWhen, summarizeJobs } from './appointments.js';
-const staffTypes = new Set(['staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
+const staffTypes = new Set(['related_jobs','staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
 const clean = value => typeof value === 'string' ? value.trim().slice(0,1500) : '';
 export function decideConversation({ context: original, intent, safety, now = new Date() }) {
   const staff = ['maintenance','manager'].includes(original.identity.role);
@@ -24,6 +25,22 @@ export function decideConversation({ context: original, intent, safety, now = ne
       return result('Thanks! I’ll ask our team to confirm your contact details. What maintenance problem can I help with?',[{type:'request_link_approval',fields:{name:nextState.name,address:nextState.address}}]);
     }
     return result('Your contact details are awaiting staff confirmation. I’ll keep your message with this conversation for the team.',[{type:'pending_note',fields:{description:clean(context.inbound)}}]);
+  }
+  if(type==='related_jobs') {
+    const ids=fields.jobIds || [];
+    const related=context.jobs.filter(j=>ids.includes(j.id));
+    if(ids.length<2 || related.length!==ids.length || related.some(j=>!j.tenant_id || j.tenant_id!==related[0].tenant_id || j.status==='completed')) return result('I need our team to review those records in PropertyHQ before treating them as the same repair.');
+    const primary=[...related].sort((a,b)=>Number(a.job_number)-Number(b.job_number))[0];
+    nextState.activeJobId=primary.id;
+    const pending=context.state?.pendingStaffOffer || (ids.includes(context.state?.pendingOptions?.jobId)?context.state.pendingOptions:null);
+    const note=`Staff identified ${related.map(j=>'#'+j.job_number).join(' and ')} as the same repair. Use #${primary.job_number} for this visit; original records retained.`;
+    const actions=[{type:'add_details',jobId:primary.id,fields:{description:note,requestScheduling:false}}];
+    const ack=`I’ve noted that ${related.map(j=>'#'+j.job_number).join(' and ')} describe the same repair for ${primary.tenant_name || 'this tenant'}. For this visit, I’ll use #${primary.job_number}.`;
+    if(pending && validOptions(pending.options,now)) {
+      delete nextState.pendingStaffOffer;nextState.pendingOptions={jobId:primary.id,options:pending.options};
+      return result(`${ack} ${optionText(pending.options,context.settings.timezone)}. Shall I send these visit options to the tenant?`,actions);
+    }
+    return result(`${ack} What visit times are available?`,actions);
   }
   if(type==='conversation_note') return result('I’ve kept that note with this conversation.');
   if(type==='mock_schedule') return result('Example only — not saved: Monday 9 AM, property check; Tuesday 1 PM, maintenance follow-ups. To add a real staff-only entry, send the task, day and time.');
@@ -62,7 +79,11 @@ export function decideConversation({ context: original, intent, safety, now = ne
     const reply=Object.keys(facts).length ? inspectionReply({facts,isNew:true,name:context.identity.name,followUp}) : `Thanks${context.identity.name?`, ${context.identity.name}`:''}. I’ll ask maintenance for available visit times. ${followUp}`;
     return result(reply,[{type,fields:{description:clean(fields.description),category:safety?.category || 'general_maintenance',facts,requestScheduling:true}}]);
   }
-  const job = intent?.jobId ? context.jobs.find(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)) : context.jobs.length===1 ? context.jobs[0] : null;
+  const job = staff ? workingStaffJob(context,context.inbound,intent?.jobId) : intent?.jobId ? context.jobs.find(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)) : context.jobs.length===1 ? context.jobs[0] : null;
+  if(staff && type==='offer_times' && !job && validOptions(fields.options,now)) {
+    nextState.pendingStaffOffer={options:fields.options};
+    return result(`I have ${optionText(fields.options,context.settings.timezone)}. Which repair should I use? You can give me the tenant’s name, address or job number.`);
+  }
   if (!job) return result(context.jobs.length ? (staff?'Which request is this about? Please include its job number, or tell me it’s a new issue.':'Which repair are you following up on, or is this something new?') : `Hi ${context.identity.name || 'there'}! What maintenance problem can I help with?`);
   nextState.activeJobId=job.id;
   const action = f=>[{type,jobId:job.id,fields:f}];
@@ -75,8 +96,10 @@ export function decideConversation({ context: original, intent, safety, now = ne
   if (type==='offer_times' || type==='confirm_options') {
     if (!validOptions(fields.options,now)) return result('Please send one to three future visit options. For broad availability, include the day and available hours.');
     if (type==='offer_times') {
+      if(job.status==='completed') return result('That repair is marked complete. Which open repair should I use for this visit?');
+      delete nextState.pendingStaffOffer;
       nextState.pendingOptions={jobId:job.id,options:fields.options};
-      return result(`For #${job.job_number}: ${optionText(fields.options,context.settings.timezone)}. Reply CONFIRM OPTIONS to send these to the tenant.`);
+      return result(`For ${job.tenant_name || 'the tenant'} (#${job.job_number})${job.address?` at ${job.address}`:''}: ${optionText(fields.options,context.settings.timezone)}. Shall I send these visit options to the tenant?`);
     }
     const pending=context.state?.pendingOptions;
     if (!pending || pending.jobId!==job.id || JSON.stringify(pending.options.map(o=>[Date.parse(o.start),Date.parse(o.end),!!o.flexible,o.label||null]))!==JSON.stringify(fields.options.map(o=>[Date.parse(o.start),Date.parse(o.end),!!o.flexible,o.label||null]))) return result('Please provide the appointment options first.');
@@ -110,6 +133,10 @@ export function decideConversation({ context: original, intent, safety, now = ne
   }
   if (type==='add_details') {
     if(nextState.pendingIssue?.jobId===job.id) delete nextState.pendingIssue;
+    if(staff) {
+      const facts=mergeFacts({},fields.facts);delete facts.entryPermission;delete facts.availability;
+      return result(`Noted for ${job.tenant_name || 'the tenant'}’s ${repairLabel(job)} (#${job.job_number}).`,action({description:clean(fields.description)||clean(context.inbound),facts,requestScheduling:false}));
+    }
     const facts=mergeFacts(job.coordinator_details,fields.facts);
     return result(Object.keys(facts).length ? inspectionReply({facts,scheduled:!!job.scheduled_at,followUp}) : `Thanks for the update. I’ll pass that along to maintenance. ${followUp}`,action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts),requestScheduling:!job.scheduled_at}));
   }

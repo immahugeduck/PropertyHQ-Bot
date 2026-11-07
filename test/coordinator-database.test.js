@@ -23,6 +23,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261102010000_conversation_flow_refinements.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261107000000_workflow_repairs.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261107010000_tenant_conversation_language.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261107020000_staff_conversation_continuity.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -145,6 +146,22 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  for(let i=0;i<2;i++) await commit(secondPhone,requestVersion+i,[{type:'request_scheduling',jobId:form.id,fields:{description:'Can we get this week?'}}]);
  assert.equal((await db.query("select count(*)::int n from public.coordinator_outbox where request_id=$1 and action_key='scheduling_followup'",[form.id])).rows[0].n,1);
  assert.ok((await ctx(secondPhone)).jobs.every(j=>j.notes==null));
+ // Staff alert -> unnumbered offer -> duplicate clarification -> natural staff confirmation.
+ const staffForm=(await db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,source) values($1,$2,$3,'Another report of window screen','Same window issue','app') returning id",[user,property,tenant])).rows[0];
+ await db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",['app-maintenance:'+staffForm.id,maintenance]);
+ const staffVisit=[{start:'2035-01-15T14:30:00Z',end:'2035-01-15T15:30:00Z'}];
+ const staffProposal=await run(maintenance,'I can come by at 9:30',{type:'offer_times',fields:{options:staffVisit}});
+ assert.match(staffProposal,/Sarah/);assert.equal((await ctx(maintenance)).state.pendingOptions.jobId,staffForm.id);
+ const duplicateReply=await run(maintenance,'These describe the same repair',{type:'related_jobs',fields:{jobIds:[form.id,staffForm.id]}});
+ assert.match(duplicateReply,/9:30 AM/);assert.doesNotMatch(duplicateReply,/Does maintenance.*permission/);
+ const primary=(await ctx(maintenance)).state.pendingOptions.jobId;
+ const staffConfirmed=await run(maintenance,'Yes, please.');assert.match(staffConfirmed,/recorded the options/);
+ assert.equal((await ctx(secondPhone)).jobs.find(j=>j.id===primary).stage,'awaiting_selection');
+ // Staff notes update the manager without echoing a second SMS back to maintenance.
+ await run(maintenance,'These reports describe the same kitchen repair.',{type:'add_details',jobId:form.id,fields:{description:'Staff fixture note'}});
+ const staffEvent=(await db.query('select sid from public.coordinator_events where phone=$1 order by created_at desc limit 1',[maintenance])).rows[0].sid;
+ const staffNotices=(await db.query('select to_number,tenant_id from public.coordinator_outbox where event_sid=$1',[staffEvent])).rows;
+ assert.ok(staffNotices.some(n=>n.to_number===manager));assert.equal(staffNotices.some(n=>n.to_number===maintenance),false);assert.ok(staffNotices.every(n=>n.tenant_id===null));
  await db.exec('set role anon');await assert.rejects(db.query('select public.coordinator_context($1,$2)',['+13175550000',from]),/permission denied/);await db.exec('reset role');
  } finally {await db.close();}
 });
