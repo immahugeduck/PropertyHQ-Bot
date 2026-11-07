@@ -83,4 +83,8 @@ test('permission-led SQL: private suggestions, conflicts and staff-only booking'
  await db.query("insert into public.maintenance_requests(user_id,property_id,title,description,scheduled_date,source) values($1,$2,'Portal booking','Date only','2035-01-01','sms')",[user,property]);
  assert.ok((await free()).every(s=>!s.start.startsWith('2035-01-01')));
  await db.query("update public.triage_settings set open_days=ARRAY[]::smallint[] where user_id=$1",[user]);assert.deepEqual(await free(),[]);
+ // A rejected cross-account portal write must not inspect the target owner's calendar first.
+ await db.exec(`create or replace function auth.uid() returns uuid language sql as 'select ''${other}''::uuid'; grant usage on schema auth to authenticated; grant insert on public.maintenance_requests to authenticated; grant usage on sequence public.maintenance_job_number_seq to authenticated; alter table public.maintenance_requests enable row level security; create policy fixture_owner_write on public.maintenance_requests for insert to authenticated with check(user_id=auth.uid()); set role authenticated;`);
+ await assert.rejects(db.query("insert into public.maintenance_requests(user_id,property_id,title,description,scheduled_at,source) values($1,$2,'Foreign write','Denied',$3,'sms')",[user,property,slot.start]),/row-level security/);
+ await db.exec('reset role');
  }finally{await db.close();}});
