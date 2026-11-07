@@ -1,0 +1,9 @@
+# Permission-led maintenance scheduling
+
+The user clarified the agreed flow: acknowledge every request, say maintenance will reach out to schedule, and ask permission to enter while nobody is home. Calendar suggestions go only to maintenance. Maintenance approves all scheduling; never book automatically from tenant permission alone.
+
+With entry permission, suggest one available visit to maintenance. Their approval books it atomically, updates PropertyHQ, and sends the tenant a confirmed-visit notice. The tenant need not select a time. Without entry permission, suggest three openings to maintenance. Only after maintenance approves three options does the tenant receive them to choose and confirm. Unknown or conditional permission remains unresolved and cannot authorize unattended entry.
+
+Use the existing account timezone, configured working days/hours, recorded appointments, maintenance staff calendar blocks, and portal-scheduled repairs. Proposed openings are suggestions, not promised availability. Preserve the existing one-hour internal capacity reservation; staff can replace suggestions. Search the next 14 days, starting at least one hour ahead. If fewer than the required openings exist, report that to maintenance rather than invent times. Keep suggested options private until approved and check conflicts again at booking.
+
+Approach selected by the user's clarification: deterministic calendar suggestions plus staff approval. Retaining manual-only scheduling misses the requested calendar assistance. Automatic booking was explicitly ruled out by the requirement that suggestions go only to maintenance. Existing identity, consent, emergency routing, idempotency and completion behavior remain in force. Previously approved native execution and live rollout remain authorized; development tests must not send real messages or replay old alerts.

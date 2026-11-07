@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vercel dev",
     "test": "node --test",
-    "check": "node --check api/agentphone/webhook.js && node --check api/twilio/sms.js && node --check api/twilio/voice.js && node --check api/health.js && node --check api/twilio/public-config.js && node --check src/agentphone.js && node --check src/twilio.js && node --check src/keywords.js && node --check src/audit.js && node --check src/triage.js && node --check src/inkbox.js && node --check api/inkbox/imessage.js && node --check src/supabase.js && node --check src/intake.js && node --check src/staff.js"
+    "check": "find api src -name \"*.js\" -print0 | xargs -0 -n1 node --check"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "vercel": "^46.0.0"
   }
 }

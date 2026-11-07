@@ -1,3 +1,4 @@
+import { coordinateSms } from '../../src/conversation-service.js';
 import {
   readRawBody,
   parseFormBody,
@@ -59,6 +60,10 @@ export default async function handler(req, res) {
   if (keyword) {
     auditEvent({ event: 'twilio.keyword', channel: 'sms', conversationId, severity: null, category: keyword, verified: true });
     return sendTwiml(res, smsTwiml(''));
+  }
+
+  if (process.env.COORDINATOR_ENABLED === 'true') {
+    return sendTwiml(res, smsTwiml(await coordinateSms({ params })));
   }
 
   if (!message) {

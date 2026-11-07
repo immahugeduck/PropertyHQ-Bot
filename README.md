@@ -168,6 +168,94 @@ Phase 1 recognizes explicit emergency signals including suspected gas/CO, fire/s
 
 This software assists maintenance intake; it is not a substitute for emergency services or qualified on-site diagnosis.
 
+## Conversational maintenance coordinator (opt-in)
+
+The SMS coordinator remembers verified contacts and pending name/address answers,
+keeps separate jobs, and lets the tenant select from two or three staff-supplied
+appointment windows. AI interprets intent; application and database code enforce
+staff roles, ownership and appointment transitions. Emergency guidance bypasses AI.
+Existing voice, Inkbox and AgentPhone behavior is preserved.
+
+Implementation/design: `docs/superpowers/specs/2026-11-01-conversation-coordinator-design.md`.
+The coordinator is **disabled by default**. Before a separately authorized pilot:
+
+1. Review and apply PropertyHQ's `20261102000000_conversation_coordinator.sql`
+   migration using the normal database release process. Do not enable the new
+   handler against the old schema. The automated tests use a disposable PGlite
+   database, never the configured Supabase project.
+2. Verify `triage_settings.maintenance_phone` is the full number ending 9030,
+   `manager_phone` ends 6088, and `timezone` is correct. Those are the only staff
+   identities. New requests route to maintenance, emergencies/updates to manager;
+   appointment choices notify both staff. Staff authority comes from verified
+   Twilio sender identity, not AI output or message contents.
+3. Set `COORDINATOR_MODEL` if changing the default and verify OpenAI API/model
+   access. The environment needs HTTPS access to `api.openai.com`; do not assume
+   key presence establishes API access. No live model calls happen in tests.
+4. Set a strong `COORDINATOR_DELIVERY_SECRET` securely. Configure a trusted runner
+   to POST `/api/coordinator/deliver` with `Authorization: Bearer <secret>` at a
+   cadence suitable for timely alerts and drain until `processed` is zero. Each
+   call claims at most two messages. This is mandatory: webhook responses enqueue
+   staff/tenant notifications but do not send them inline. A scheduler has NOT
+   been provisioned automatically. Emergency guidance is immediate; staff alerts
+   depend on a functioning delivery runner. Do not enable without monitoring it.
+5. After review, separately enable `COORDINATOR_ENABLED=true` and
+   `COORDINATOR_OUTBOUND_ENABLED=true`. Enabling flags is NOT deployment or
+   migration. Keep disabled for local simulation.
+
+Example staff messages (include a job number when multiple requests exist):
+
+- `What's scheduled today?` / `Update on job 1003?`
+- `For 1003 offer Tuesday January 8 10–11am or Wednesday January 9 1–2pm`.
+  Include a year or explicit date when ambiguity is possible. The bot asks for
+  clarification instead of inventing a time. Staff reviews the interpreted dates and replies `CONFIRM OPTIONS` to publish them. Tenant replies `1` or `2`, reviews the exact date shown, then replies `CONFIRM` to book. Old or replaced proposals cannot silently book a different time.
+- `1003 work started`, `1003 waiting on a part`, `1003 complete`.
+- Unknown contact approval: inspect the pending name/address against PropertyHQ,
+  then `approve +1... tenant <PropertyHQ tenant UUID>`. A phone/name/address claim
+  alone never discloses the existing tenant's records. To remove a mistaken link,
+  `unlink +1...`. Unlinking preserves history but requires future verification.
+
+The transaction records inbound text, prepared reply and controlled actions.
+Prepared replies and provider-accepted messages are not proof of delivery.
+Outbox states: queued → sending → sent/uncertain; revoked private destinations become cancelled. Timeouts and crashes after claim
+require operator reconciliation against Twilio logs; do not automatically resend
+`sending` or `uncertain` entries. There is no exactly-once guarantee at the carrier.
+Keep provider errors and secrets out of tenant replies. Inspect failed workers and
+queue age, especially for emergencies. Do not bulk-release an old queue after a
+long outage without reviewing its messages and appointment relevance.
+
+`npm test` includes conversation fixtures, cross-role denial, real migration tests,
+idempotency, contact approval and scheduling. `npm run check` checks all JS modules.
+
+AI chooses the conversational intent and one relevant missing-detail question. Record, schedule and delivery confirmations use application-controlled wording so model prose cannot claim an action that failed. Known contacts are not asked for their address.
+
+### Conversation walkthrough refinements
+
+Apply the additive `20261102010000_conversation_flow_refinements.sql` after the
+coordinator migration before enabling the updated handler. It persists job-specific
+availability, entry permission, main-door security and tenant-reported leak pattern.
+An omitted fact keeps its earlier value; an explicit refusal replaces earlier
+entry permission. Staff messages cannot grant entry permission for the tenant.
+
+A washer leak only while running does not trigger the same question again. A
+screen-door report can ask whether the main door still closes and locks, while
+already referring the repair. A suspected disposal/drain leak goes toward inspection
+and scheduling even if nobody is home to check it. The tenant may update the team
+later; diagnosis is never a condition of arranging a visit. Late tenant details go
+to both staff numbers with current visit and entry permission included.
+
+Staff can offer one specific visit or up to three options. Broad options retain
+their label (such as “Wednesday anytime”) and require a specific tenant-selected
+time inside the offered hours. Staff reviews parsed dates with CONFIRM OPTIONS;
+tenant booking still requires CONFIRM of the displayed exact time. Exact visits
+reserve one hour internally for conflict checking; this is not a promised repair
+duration. Broad availability uses configured business hours, with morning ending
+at noon. Missing or ambiguous hours/dates require clarification.
+
+Staff notifications are queued atomically before the webhook acknowledgement;
+actual carrier delivery happens later through the delivery worker. The bot does
+not claim those messages have been delivered. Live model wording/interpretation
+has not been tested against OpenAI; all automated examples use controlled fixtures.
+
 ## Agent HQ: conversation and schedule memory
 
 Agent HQ is First Call Maintenance’s helpful, organized maintenance assistant.
@@ -192,3 +280,62 @@ service. Saving an appointment does not create an automatic future reminder.
 Inkbox replies use the Agent HQ name but do not have Property HQ schedule recall;
 the existing Twilio SMS/voice intake provides that database integration.
 The Inkbox provider identity and GitHub repository name are unchanged.
+
+### Free delivery scheduling on Vercel Hobby
+
+Use a free cron-job.org account to run the existing authenticated worker once a
+minute; the bot itself stays on Vercel Hobby. Generate the scheduler API key under
+Settings in https://console.cron-job.org and enter it securely as CRON_JOB_API_KEY
+in the cloud environment. The cloud network policy must allow api.cron-job.org.
+
+`NODE_USE_ENV_PROXY=1 node scripts/provision-delivery-job.mjs --dry-run` shows a
+redacted plan. Without --dry-run, the helper creates or updates a **disabled** job.
+It refuses duplicates and refuses to modify an already enabled worker. It uses
+POST, every-minute scheduling, the existing delivery secret and scheduler failure
+notifications. It does not change the bot's feature flags or enable delivery.
+Never paste secrets into command arguments or source files.
+
+Before enabling that job, deploy and verify the worker's production endpoint,
+set the matching coordinator flags/secrets, verify an authenticated empty-queue
+request and review the prepared pilot. Scheduler timing can drift and messages
+can queue; this is not a guaranteed real-time emergency dispatch service. Existing
+immediate emergency guidance remains independent of AI.
+
+OpenAI key copy/paste whitespace is removed in memory before authentication. Keys
+are never logged or rewritten. The interpreter allows up to six seconds for a
+model response within the service's nine-second deadline; safety replies bypass AI.
+Entry permission is derived from an explicit, unqualified tenant statement or a
+clear answer to the permission question. Nobody being home is not a refusal, and
+conditional/negated permission never grants entry while absent.
+
+### Form intake and role-aware scheduling repair
+
+Apply `20261107000000_workflow_repairs.sql` after the two coordinator migrations.
+It bridges future `source=app` inserts to the same account-scoped notification
+outbox, with one staff alert and a verified-tenant acknowledgement. SMS/voice
+inserts are excluded to prevent duplicates. Updates do not replay initial alerts;
+accounts without routing never fall back to another owner's staff. No historical
+requests are backfilled. Bot questions and delivered outbound messages retain their
+job association so a reply such as “Yes” applies to the right permission question.
+
+Tenant status replies use plain language and never include staff notes or the
+staff report layout. An unbooked request can ask maintenance for availability;
+repeat scheduling pings are deduplicated per request/day and existing valid options
+are shown instead of requesting new ones. Staff queries distinguish this week,
+next week, confirmed visits, and requests still waiting for a time. Mock schedules
+are labeled as unsaved examples, never presented as real bookings.
+
+Both configured staff phones can add staff-only calendar entries. Example:
+“Add supply pickup next Tuesday at 10 AM; no tenant message.” Missing task/time
+is collected conversationally. Entries are stored separately from tenant requests,
+are visible only to staff, and create no tenant notification. Conflict checks apply
+to the relevant staff calendar and maintenance appointment windows. Calendar entries
+are records, not automatic timed reminders.
+
+## Permission-led scheduling
+
+Calendar suggestions are private to maintenance until staff approve them. New requests acknowledge the issue, say maintenance will reach out to schedule, and ask permission to enter while nobody is home. With permission, staff approve one visit and the tenant receives a booking notice. Without permission, staff approve three options before the tenant chooses and confirms. Unknown permission cannot authorize unattended booking.
+
+Suggestions use configured working days/hours, recorded visits, maintenance calendar blocks and portal bookings; staff can replace them. Proposed internal reservations are one hour, not a promised repair duration. A date-only portal booking occupies that day until a precise time is recorded. The bot searches the next fourteen days with at least one-hour lead time. Approval is bound to the exact displayed proposal and conflicts are rechecked atomically, including portal writes. Private suggestions cannot become tenant options merely by asking for alternatives.
+
+Apply additive migration `20261107030000_permission_led_scheduling.sql` before this version. Previously applied pilot migrations must not be blindly reapplied. This migration does not backfill alerts or book existing requests.

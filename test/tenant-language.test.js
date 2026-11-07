@@ -1,0 +1,19 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {decideConversation} from '../src/coordinator.js';
+import {summarizeJobs} from '../src/appointments.js';
+import {interpretMessage} from '../src/assistant.js';
+const now=new Date('2030-01-01T12:00:00Z');
+const job={id:'j',job_number:1005,tenant_id:'t',title:'Kitchen window screen',status:'open',scheduled_at:null,notes:'Internal staff note',coordinator_details:{issue:'window_screen'}};
+const base=()=>({identity:{role:'tenant',state:'known',tenantId:'t',propertyId:'p',name:'Claude'},settings:{timezone:'America/Indiana/Indianapolis'},jobs:[job],state:{},messages:[],staffEvents:[],inbound:'Can we arrange a visit this week?'});
+const decide=(c,intent)=>decideConversation({context:c,intent,now});
+const noCodes=reply=>{assert.doesNotMatch(reply,/#\d+|\b1005\b|Internal staff|job number|Issue:|Progress:/i);};
+test('tenant follow-up uses name, issue and scheduling next step without ticket identifiers',()=>{const d=decide(base(),{type:'request_status',jobId:'j',fields:{}});noCodes(d.reply);assert.match(d.reply,/Claude/);assert.match(d.reply,/window screen/i);assert.equal(d.actions[0].jobId,'j');});
+test('tenant clarification asks about the repair rather than requesting a job number',()=>{const c=base();c.jobs=[job,{...job,id:'other',job_number:1006,title:'Washer leak'}];const d=decide(c,{type:'add_details',fields:{description:'That is fine'}});noCodes(d.reply);assert.match(d.reply,/repair|window|washer/i);});
+test('tenant selection and booking hide identifiers while preserving exact date confirmation',()=>{const c=base();c.jobs=[{...job,proposal_version:1,options:[{start:'2030-01-02T15:00:00Z',end:'2030-01-02T16:00:00Z'}]}];let d=decide(c,{type:'choose_time',jobId:'j',fields:{choice:1,proposalVersion:1}});noCodes(d.reply);assert.match(d.reply,/10:00 AM/);assert.match(d.reply,/work for you/i);c.state=d.nextState;d=decide(c,{type:'select_time',jobId:'j',fields:{choice:1,proposalVersion:1}});noCodes(d.reply);assert.equal(d.actions[0].jobId,'j');});
+test('tenant summaries hide codes but staff summaries keep useful references',()=>{const c=base();noCodes(summarizeJobs({context:c,now}));c.identity.role='maintenance';assert.match(summarizeJobs({context:c,now}),/#1005/);});
+test('an unqualified yes confirms a pending displayed time without a keyword command',async()=>{const c=base();c.state.pendingSelection={jobId:'j',choice:1,proposalVersion:7};c.messages=[{reply:'Maintenance can come by Wednesday at 10 for the window screen. Does that time work for you?',jobId:'j'}];const r=await interpretMessage({context:c,text:'Yes, that works.',env:{}});assert.equal(r.type,'select_time');assert.equal(r.fields.proposalVersion,7);});
+test('conditional yes never confirms a pending appointment automatically',async()=>{const c=base();c.state.pendingSelection={jobId:'j',choice:1,proposalVersion:7};const r=await interpretMessage({context:c,text:'Yes, but only after 5 instead',env:{}});assert.notEqual(r.type,'select_time');});
+
+test('yes to a later unrelated question never books an older pending visit',async()=>{const c=base();c.state.pendingSelection={jobId:'j',choice:1,proposalVersion:7};c.messages=[{reply:'Could you send a photo if it’s safe to take one?',jobId:'j'}];const r=await interpretMessage({context:c,text:'Yes',env:{}});assert.notEqual(r.type,'select_time');});
+test('yes to entry permission is recorded as permission rather than appointment confirmation',async()=>{const c=base();c.state.pendingSelection={jobId:'j',choice:1,proposalVersion:7};c.messages=[{reply:'Does maintenance have permission to enter if nobody is home?',jobId:'j'}];const r=await interpretMessage({context:c,text:'Yes',env:{}});assert.equal(r.type,'add_details');assert.equal(r.fields.facts.entryPermission,true);});
