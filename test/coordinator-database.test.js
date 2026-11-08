@@ -98,7 +98,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const entryJob=(await ctx(from)).jobs.find(j=>j.description==='Kitchen faucet leaking under sink; disposal not working');
  const requestCount=(await db.query('select count(*)::int n from public.maintenance_requests where user_id=$1',[user])).rows[0].n;
  const unclear=await run(from,'Maybe, I need to check.');assert.match(unclear,/permission.*enter/i);
- const entryReply=await run(from,'Yes that is fine with me.');assert.doesNotMatch(entryReply,/permission.*enter|what.*maintenance/i);
+ const entryReply=await run(from,'Yes that is fine with me.');assert.doesNotMatch(entryReply,/\?|what.*maintenance/i);
  const entryAfter=(await ctx(from)).jobs.find(j=>j.id===entryJob.id);
  assert.equal(entryAfter.coordinator_details.entryPermission,true);
  assert.equal((await db.query('select count(*)::int n from public.maintenance_requests where user_id=$1',[user])).rows[0].n,requestCount);

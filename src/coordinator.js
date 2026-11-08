@@ -127,6 +127,16 @@ export function decideConversation({ context: original, intent, safety, now = ne
       return result(`Noted for ${job.tenant_name || 'the tenant'}’s ${repairLabel(job)} (#${job.job_number}).`,action({description:clean(fields.description)||clean(context.inbound),facts,requestScheduling:false}));
     }
     const facts=mergeFacts(job.coordinator_details,fields.facts);
+    const incoming=mergeFacts({},fields.facts);
+    if(typeof incoming.entryPermission==='boolean' && Object.keys(incoming).length===1) {
+      const acknowledgement=incoming.entryPermission
+        ? 'Thanks, I’ve recorded your permission to enter while nobody is home.'
+        : 'Thanks, I’ve recorded that maintenance must arrange entry with you.';
+      const scheduling=job.scheduled_at
+        ? (incoming.entryPermission?' Your visit remains scheduled.':' I’ll let maintenance know to arrange access for your scheduled visit.')
+        : ' I’ll coordinate the visit with maintenance.';
+      return result(acknowledgement+scheduling,action({description:clean(fields.description)||clean(context.inbound),facts:incoming,requestScheduling:!job.scheduled_at}));
+    }
     return result(Object.keys(facts).length ? inspectionReply({facts,scheduled:!!job.scheduled_at,followUp}) : `Thanks for the update. I’ll pass that along to maintenance. ${followUp}`,action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts),requestScheduling:!job.scheduled_at}));
   }
   return result(job.options?.length ? `${staff?`For #${job.job_number}`:`For the ${repairLabel(job)}`}, which option works for you? ${optionText(job.options,context.settings.timezone)}` : staff?`How can I help with request #${job.job_number}?`:`What would you like to know about the ${repairLabel(job)}?`);

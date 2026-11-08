@@ -5,12 +5,38 @@ import {decideConversation} from '../src/coordinator.js';
 const question='Thanks for letting me know, Randy. We’ll follow up with appointment options from maintenance. Does maintenance have permission to enter if nobody’s home?';
 const job={id:'original',tenant_id:'t',job_number:1010,title:'Kitchen faucet and disposal',status:'open',coordinator_details:{issue:'sink_disposal'}};
 const base=()=>({identity:{role:'tenant',state:'known',tenantId:'t',propertyId:'p',name:'Randy'},settings:{timezone:'America/Indiana/Indianapolis'},state:{activeJobId:'original'},jobs:[job],messages:[{reply:question,jobId:'original'}]});
-for(const text of ['Yes that is fine with me.','Yes lol','Sure, thank you!','Yes, you can.']) test(`permission answer updates the original repair: ${text}`,async()=>{
+for(const text of ['Yes that is fine with me.','Yes lol','Sure, thank you!','Yes, you can.','Yes permission granted.','Yes, permission granted!','YES PERMISSION IS GRANTED.','Permission granted.']) test(`permission answer updates the original repair: ${text}`,async()=>{
  const context=base();context.inbound=text;
  const intent=await interpretMessage({context,text,env:{}});
  const decision=decideConversation({context,intent});
- assert.equal(decision.actions.length,1);assert.equal(decision.actions[0].type,'add_details');assert.equal(decision.actions[0].jobId,'original');assert.equal(decision.actions[0].fields.facts.entryPermission,true);
- assert.doesNotMatch(decision.reply,/what.*maintenance|permission.*enter/i);
+ assert.equal(decision.actions.length,1);assert.equal(decision.actions[0].type,'add_details');assert.equal(decision.actions[0].jobId,'original');assert.equal(decision.actions[0].fields.facts?.entryPermission,true);
+ assert.doesNotMatch(decision.reply,/what.*maintenance|\?/i);
+});
+test('a permission-only answer acknowledges the saved fact without repeating appliance precautions',async()=>{
+ const context=base();context.inbound='Yes permission granted.';
+ const intent=await interpretMessage({context,text:context.inbound,env:{}});
+ const decision=decideConversation({context,intent});
+ assert.match(decision.reply,/recorded.*permission/i);
+ assert.doesNotMatch(decision.reply,/\?|avoid using|leave.*off/i);
+});
+test('a passive refusal is saved as refused, rather than asking for the same answer',async()=>{
+ const context=base();context.inbound='Permission not granted.';
+ const intent=await interpretMessage({context,text:context.inbound,env:{}});
+ const decision=decideConversation({context,intent});
+ assert.equal(decision.actions[0]?.fields.facts?.entryPermission,false);
+ assert.doesNotMatch(decision.reply,/\?/);
+});
+for(const text of ['Yes permission granted, but call me first.','Permission granted only if I am home.','Permission granted?','Yes permission granted after 5.']) test(`permission wording must not erase a restriction or question: ${text}`,async()=>{
+ const context=base();context.inbound=text;
+ const intent=await interpretMessage({context,text,env:{}});
+ assert.notEqual(intent.fields?.facts?.entryPermission,true);
+});
+test('passive permission and a short yes are not answers to a scheduling question',async()=>{
+ const context=base();context.messages=[{reply:'Does Tuesday work for you?',jobId:'original'}];
+ for(const text of ['Permission granted.','Yes']) {
+  const intent=await interpretMessage({context,text,env:{}});
+  assert.notEqual(intent.fields?.facts?.entryPermission,true);
+ }
 });
 test('a reply to a repeated permission question uses the active repair when its log has no job id',async()=>{
  const context=base();context.messages=[{message:'Unrelated previous inbound'},{reply:question,jobId:null}];
