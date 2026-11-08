@@ -13,7 +13,7 @@ Work runs in sibling PropertyHQ-Bot and PropertyHQ worktrees on `feat/tenant-mai
 ## Checkpoints
 
 - Upgrade 1: complete. The focused raw-text and database replay checks passed (26 tests). Full bot suite: 230 tests passed. `npm run check` passed. The original BREE wording was observed failing before the parser change. The full suite passes with local fixture subprocesses enabled; no scheduler product fix was needed.
-- Upgrade 2: pending.
+- Upgrade 2: complete. Seven persistence/outbox examples passed, including manager context, one-reference work orders, ambiguous/repeated answer suppression, form intake, post-booking revocation and helper access restrictions. Full bot suite: 236 tests passed; Property HQ: 28 tests passed; bot syntax and diff checks passed.
 - Upgrade 3: pending.
 
 ## Limits

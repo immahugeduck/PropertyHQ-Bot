@@ -61,11 +61,11 @@ Property HQ:
 - Consumes: existing `coordinator_commit(p_user,p_from,p_sid,p_version,p_message,p_decision)`, `coordinator_form_intake()`, and stored `maintenance_requests.coordinator_details`.
 - Produces: internal `coordinator_work_order(p_user uuid,p_request uuid,p_update text default null) -> text`; unchanged public RPC and outbox contracts, including `schedule_proposal` snapshots.
 
-- [ ] Extend workflow tests before implementation. Assert maintenance receives one job reference, repair facts and a clear permission status, without the raw `Yes permission granted` text. Assert the manager receives initial context and later context updates.
-- [ ] Add failing checks for ambiguous clarification and repeated unchanged permission: no extra maintenance notification and no proposal-version churn. Assert changed permission after a booking still alerts maintenance.
-- [ ] Create an additive migration using the Supabase CLI. Preserve existing function authority/validation and format maintenance bodies from saved state; keep manager context separate. Reuse the helper for form intake and scheduling follow-ups.
-- [ ] Load the migration in all real-database fixture tests. Run `node --test test/tenant-maintenance-workflow.test.js test/coordinator-database.test.js test/permission-scheduling-database.test.js` and inspect the actual bodies and saved fields.
-- [ ] Run `npm test` and `npm run check` in the bot, and `npm test` in Property HQ. Record results and commit this upgrade in both repositories.
+- [x] Extend workflow tests before implementation. Assert maintenance receives one job reference, repair facts and a clear permission status, without the raw `Yes permission granted` text. Assert the manager receives initial context and later context updates.
+- [x] Add failing checks for ambiguous clarification and repeated unchanged permission: no extra maintenance notification and no proposal-version churn. Assert changed permission after a booking still alerts maintenance.
+- [x] Create an additive migration using the Supabase CLI. Preserve existing function authority/validation and format maintenance bodies from saved state; keep manager context separate. Reuse the helper for form intake and scheduling follow-ups.
+- [x] Load the migration in all real-database fixture tests. Run `node --test test/tenant-maintenance-workflow.test.js test/coordinator-database.test.js test/permission-scheduling-database.test.js` and inspect the actual bodies and saved fields.
+- [x] Run `npm test` and `npm run check` in the bot, and `npm test` in Property HQ. Record results and commit this upgrade in both repositories.
 
 ## Upgrade 3: close the scheduling and follow-up loop
 
