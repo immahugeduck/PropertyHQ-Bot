@@ -19,3 +19,19 @@ test('a manual visit review takes precedence over a different stored calendar su
 test('tenant numeric reply selects only staff-approved choices, never confirmed or private slots',async()=>{const c=base(false);c.identity={role:'tenant',state:'known',tenantId:'t',propertyId:'p'};c.jobs[0].stage='awaiting_selection';c.jobs.push({...c.jobs[0],id:'already',stage:'confirmed'},{...c.jobs[0],id:'private',stage:'awaiting_staff'});const i=await interpretMessage({context:c,text:'2',env:{}});assert.equal(i.type,'choose_time');assert.equal(i.jobId,'j');});
 test('approval uses the suggestion actually shown, not a replacement generated later',async()=>{const c=base(true);c.jobs[0].options=[options[1]];c.jobs[0].proposal_version=5;c.messages=[{reply:'Suggested visit: Wednesday at 10. Shall I book this visit?',jobId:'j',scheduleProposal:{jobId:'j',options:[options[0]],proposalVersion:4}}];const i=await interpretMessage({context:c,text:'Yes',env:{}});const d=decide(c,i);assert.equal(d.actions.length,0);assert.match(d.reply,/changed|current/i);});
 test('asking for suggestions after expiry uses current free openings instead of the expired proposal',()=>{const c=base(true);c.jobs[0].options=[{start:'2020-01-01T15:00:00Z',end:'2020-01-01T16:00:00Z'}];const d=decide(c,{type:'request_times',jobId:'j',fields:{}});assert.deepEqual(d.nextState.pendingOptions.options,[options[0]]);assert.equal(d.actions.length,0);});
+
+test('requesting alternative times saves new availability and clears the pending choice',()=>{
+ const c=base(false);c.identity={role:'tenant',state:'known',tenantId:'t',propertyId:'p'};
+ c.state.pendingSelection={jobId:'j',choice:1,proposalVersion:4};
+ const d=decide(c,{type:'request_alternatives',jobId:'j',fields:{description:'Those times do not work; weekdays after 4.',facts:{availability:'Weekdays after 4 PM',entryPermission:null}}});
+ assert.equal(d.nextState.pendingSelection,undefined);
+ assert.equal(d.actions[0]?.type,'request_alternatives');
+ assert.deepEqual(d.actions[0].fields.facts,{availability:'Weekdays after 4 PM'});
+});
+
+test('an explicit access change carried with alternative times is not discarded',()=>{
+ const c=base(true);c.identity={role:'tenant',state:'known',tenantId:'t',propertyId:'p'};
+ const d=decide(c,{type:'request_alternatives',jobId:'j',fields:{description:'Arrange an attended visit after 4.',facts:{availability:'After 4 PM',entryPermission:false}}});
+ assert.equal(d.actions[0]?.fields.facts?.entryPermission,false);
+ assert.equal(d.actions[0].fields.facts.availability,'After 4 PM');
+});

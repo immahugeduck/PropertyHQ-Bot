@@ -128,3 +128,129 @@ test('work-order lookup is account-scoped and unavailable to public client roles
     }
   } finally {await f.close();}
 });
+
+test('washer workflow books only after maintenance approval, then recalls and completes the saved repair',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    const report='Washer in the basement will not turn on.';
+    const model={type:'new_request',fields:{description:report,facts:{issue:'washer'}}};
+    const intake=await f.run(c.tenantPhone,report,{model});
+    const granted=await f.run(c.tenantPhone,'Yes permission granted.');
+    const proposal=(await f.context(c.maintenance)).jobs[0];
+    assert.equal(proposal.stage,'awaiting_staff');
+    assert.equal(proposal.scheduled_at,null,'tenant permission alone must not book');
+    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[granted.sid,c.maintenance]);
+    const booking=await f.run(c.maintenance,'Yes, please.');
+    assert.match(booking.reply,/scheduled/);
+    const saved=(await f.context(c.tenantPhone)).jobs[0];
+    assert.equal(Date.parse(saved.scheduled_at),Date.parse(proposal.options[0].start));
+    assert.equal(saved.coordinator_details.entryPermission,true);
+    const notice=(await f.outbox(booking.sid,c.tenantPhone))[0];
+    assert.match(notice.body,/scheduled/);
+    assert.doesNotMatch(notice.body,/\?|#\d+|which.*time|reply confirm/i);
+    const status=await f.run(c.tenantPhone,'When is the washer visit?',{model:{type:'request_status',jobId:saved.id,fields:{}}});
+    assert.match(status.reply,/scheduled/i);
+    assert.equal((await f.outbox(status.sid,c.maintenance)).length,0);
+    const started=await f.run(c.maintenance,'Starting the washer repair',{model:{type:'start_work',jobId:saved.id,fields:{description:'Starting the washer repair'}}});
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'in_progress');
+    assert.ok((await f.outbox(started.sid,c.tenantPhone)).some(n=>/getting started/i.test(n.body)));
+    const completed=await f.run(c.maintenance,'Washer repaired',{model:{type:'complete_work',jobId:saved.id,fields:{description:'Washer repaired'}}});
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'completed');
+    assert.ok((await f.outbox(completed.sid,c.tenantPhone)).some(n=>/finished/i.test(n.body)));
+    const countBefore=(await f.db.query('select count(*)::int as n from public.coordinator_outbox')).rows[0].n;
+    const duplicate=await f.run(c.tenantPhone,report,{model,sid:intake.sid});
+    assert.equal(duplicate.reply,'');
+    assert.equal((await f.context(c.tenantPhone)).jobs.length,1);
+    assert.equal((await f.db.query('select count(*)::int as n from public.coordinator_outbox')).rows[0].n,countBefore);
+  } finally {await f.close();}
+});
+
+test('sink scheduling saves changed availability, clears the old choice, and requires tenant agreement',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Kitchen disposal will not work, possible leak',{model:{type:'new_request',fields:{description:'Kitchen disposal not working; possible leak',facts:{issue:'sink_disposal',leakPattern:'uncertain'}}}});
+    const refused=await f.run(c.tenantPhone,'No');
+    const plan=(await f.context(c.maintenance)).jobs[0];
+    assert.equal(plan.options.length,3);
+    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[refused.sid,c.maintenance]);
+    const approved=await f.run(c.maintenance,'Yes');
+    const choices=(await f.context(c.tenantPhone)).jobs[0];
+    assert.equal(choices.stage,'awaiting_selection');
+    assert.match((await f.outbox(approved.sid,c.tenantPhone))[0].body,/Which time works/);
+    assert.equal(choices.scheduled_at,null);
+    assert.match((await f.run(c.tenantPhone,'1')).reply,/Does that time work/);
+    const alternatives=await f.run(c.tenantPhone,"Those times don't work. Weekdays after 4 PM instead.",{model:{type:'request_alternatives',jobId:choices.id,fields:{description:'Weekdays after 4 PM instead',facts:{availability:'Weekdays after 4 PM',entryPermission:null}}}});
+    const reloaded=await f.context(c.tenantPhone),job=reloaded.jobs[0];
+    assert.equal(job.coordinator_details.availability,'Weekdays after 4 PM');
+    assert.equal(job.coordinator_details.entryPermission,false);
+    assert.equal(reloaded.state.pendingSelection,undefined);
+    assert.deepEqual(job.options,[]);
+    assert.equal(job.stage,'rescheduling');
+    assert.equal(job.scheduled_at,null);
+    const update=(await f.outbox(alternatives.sid,c.maintenance))[0];
+    assert.match(update.body,/Tenant availability: Weekdays after 4 PM/);
+    assert.match(update.body,/New visit times needed/);
+    assert.equal((await f.outbox(alternatives.sid,c.tenantPhone)).length,0);
+    await assert.rejects(f.db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb)',[c.user,c.tenantPhone,'SMstale',reloaded.version,'Old option',JSON.stringify({reply:'Old option',nextState:{},actions:[{type:'select_time',jobId:job.id,fields:{choice:1,proposalVersion:choices.proposal_version}}]})]),/stale/);
+    // Staff deliberately provides revised exact visits; no time is invented by
+    // the tenant's free-text availability or by the test's model response.
+    const revised=[0,1,2].map(day=>{
+      const start=Date.parse(plan.options[0].start)+day*86400000+8*3600000;
+      return {start:new Date(start).toISOString(),end:new Date(start+3600000).toISOString()};
+    });
+    const review=await f.run(c.maintenance,'Revised sink visit times',{model:{type:'offer_times',jobId:job.id,fields:{options:revised}}});
+    assert.match(review.reply,/Shall I send/);
+    await f.run(c.maintenance,'Yes');
+    await f.run(c.tenantPhone,'2');
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
+    const confirmed=await f.run(c.tenantPhone,'Yes, that works.');
+    assert.match(confirmed.reply,/scheduled/);
+    assert.equal(Date.parse((await f.context(c.tenantPhone)).jobs[0].scheduled_at),Date.parse(revised[1].start));
+  } finally {await f.close();}
+});
+
+test('a distinct window-screen repair keeps the permission answer on the newly asked job',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
+    const washer=(await f.context(c.tenantPhone)).jobs[0];
+    const screen=await f.run(c.tenantPhone,'Also, the bedroom window screen is torn.',{model:{type:'new_request',fields:{description:'Bedroom window screen is torn',facts:{issue:'window_screen'}}}});
+    assert.match(screen.reply,/permission.*enter/);
+    assert.doesNotMatch(screen.reply,/main.*door/i);
+    await f.run(c.tenantPhone,'Yes permission granted.');
+    const jobs=(await f.context(c.tenantPhone)).jobs;
+    assert.equal(jobs.length,2);
+    assert.equal(jobs.find(j=>j.id===washer.id).coordinator_details.entryPermission,undefined);
+    assert.equal(jobs.find(j=>j.coordinator_details.issue==='window_screen').coordinator_details.entryPermission,true);
+  } finally {await f.close();}
+});
+
+test('an emergency still routes immediately to the manager without ordinary scheduling',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    const emergency=await f.run(c.tenantPhone,'I smell gas in the kitchen.');
+    assert.match(emergency.reply,/leave|evacuat|outside/i);
+    assert.doesNotMatch(emergency.reply,/permission.*enter.*\?/i);
+    const manager=await f.outbox(emergency.sid,c.manager);
+    assert.ok(manager.some(n=>/EMERGENCY/.test(n.body)));
+    assert.ok(manager.every(n=>!/Shall I book/.test(n.body)));
+    assert.equal((await f.outbox(emergency.sid,c.maintenance)).length,0);
+    assert.equal((await f.db.query('select urgency from public.maintenance_requests where user_id=$1',[c.user])).rows[0].urgency,'emergency');
+  } finally {await f.close();}
+});
+
+test('an occupied staff slot rejects booking without a false tenant confirmation',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
+    const grant=await f.run(c.tenantPhone,'Yes permission granted.');
+    const proposal=(await f.context(c.maintenance)).jobs[0];
+    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
+    await f.db.query("insert into public.maintenance_requests(user_id,property_id,title,description,source,scheduled_at) values($1,$2,'Other repair','Already booked','sms',$3)",[c.user,c.property,proposal.options[0].start]);
+    const attempt=await f.run(c.maintenance,'Yes');
+    assert.match(attempt.reply,/couldn’t save/i);
+    const actual=(await f.context(c.tenantPhone)).jobs.find(j=>j.id===proposal.id);
+    assert.equal(actual.scheduled_at,null);
+    assert.equal((await f.outbox(attempt.sid,c.tenantPhone)).length,0);
+  } finally {await f.close();}
+});

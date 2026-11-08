@@ -115,7 +115,10 @@ export function decideConversation({ context: original, intent, safety, now = ne
     delete nextState.pendingSelection;
     return result(`You’re scheduled for ${formatWhen(start,context.settings.timezone)} for the ${repairLabel(job)}. We’ll keep you updated here.`,action({choice:fields.choice,proposalVersion:fields.proposalVersion,...(option.flexible?{appointmentStart:start,appointmentEnd:end}:{}),facts:mergeFacts({},fields.facts)}));
   }
-  if (type==='request_alternatives') return result('Thanks! I’ll pass your availability to the team for new options.',action({description:clean(fields.description)}));
+  if (type==='request_alternatives') {
+    if(nextState.pendingSelection?.jobId===job.id) delete nextState.pendingSelection;
+    return result('Thanks! I’ll pass your availability to the team for new options.',action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts)}));
+  }
   if (type==='start_work' || type==='complete_work' || type==='report_progress') {
     if (job.status==='completed' && type!=='complete_work') return result('That job is completed. Please clarify whether a new request is needed.');
     return result(`Recorded for #${job.job_number}. Notifications are queued for the manager and any verified tenant contact.`,action({description:clean(fields.description)}));

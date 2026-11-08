@@ -73,10 +73,10 @@ Property HQ:
 - Consumes: `request_alternatives` intent with `fields.description` and `fields.facts`, and persisted pending tenant selection.
 - Produces: same action with validated facts, cleared `nextState.pendingSelection`, saved availability and invalidated old database options.
 
-- [ ] Add a failing coordinator example in which a tenant changes availability while requesting alternatives. Assert the action includes `availability`, old selection is removed, and omitted permission is not restored or revoked.
-- [ ] Implement that state transition in `src/coordinator.js` without changing staff scheduling authority.
-- [ ] Extend the real workflow examples: BREE washer → saved permission → maintenance approval → booked notice; sink refusal → three approved choices → tenant confirmation; window/screen report; alternatives with saved availability; permission revocation; duplicate inbound SID; status and completion; a competing occupied slot.
-- [ ] For AI-dependent initial issue extraction, fixture only the external model response. Keep raw permission parsing, coordinator decisions, fresh context loads, SQL commits and outbox generation real. Label this distinction in test results.
+- [x] Add a failing coordinator example in which a tenant changes availability while requesting alternatives. Assert the action includes `availability`, old selection is removed, and omitted permission is not restored or revoked.
+- [x] Implement that state transition in `src/coordinator.js` without changing staff scheduling authority.
+- [x] Extend the real workflow examples: BREE washer → saved permission → maintenance approval → booked notice; sink refusal → three approved choices → tenant confirmation; window/screen report; alternatives with saved availability; permission revocation; duplicate inbound SID; status and completion; a competing occupied slot.
+- [x] For AI-dependent initial issue extraction, fixture only the external model response. Keep raw permission parsing, coordinator decisions, fresh context loads, SQL commits and outbox generation real. Label this distinction in test results.
 - [ ] Run the focused workflow file and all bot tests/checks, plus Property HQ tests. Update the example-results document, commit, and request one independent whole-change review.
 
 ## Release sequence
