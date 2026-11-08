@@ -93,7 +93,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     nextState.pendingIssue={jobId:job.id,description:clean(fields.description),facts};
     return result(`Are you following up on the same repair—the ${repairLabel(job)}?`);
   }
-  if(type==='clarify_entry' && !staff) return result('I want to make sure I record your entry preference correctly. Does maintenance have permission to enter while nobody is home?',[{type:'add_details',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),requestScheduling:false}}]);
+  if(type==='clarify_entry' && !staff) return result('I want to make sure I record your entry preference correctly. Does maintenance have permission to enter while nobody is home?',[{type:'add_details',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),requestScheduling:false,notifyMaintenance:false}}]);
   if(['offer_times','confirm_options','request_times','approve_suggestions'].includes(type)) return decideStaffScheduling({context,job,type,fields,nextState,now});
   if (type==='choose_time' || type==='select_time') {
     if (staff) return result('The tenant needs to choose one of the proposed options.');
@@ -134,7 +134,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     if(typeof incoming.entryPermission==='boolean' && Object.keys(incoming).length===1) {
       const acknowledgement=incoming.entryPermission
         ? 'Thanks, I’ve recorded your permission to enter while nobody is home.'
-        : 'Thanks, I’ve recorded that maintenance must arrange entry with you.';
+        : 'Thanks, I’ve recorded that maintenance must arrange entry permission with you.';
       const scheduling=job.scheduled_at
         ? (incoming.entryPermission?' Your visit remains scheduled.':' I’ll let maintenance know to arrange access for your scheduled visit.')
         : ' I’ll coordinate the visit with maintenance.';

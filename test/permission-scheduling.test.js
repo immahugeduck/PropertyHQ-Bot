@@ -35,3 +35,16 @@ test('an explicit access change carried with alternative times is not discarded'
  assert.equal(d.actions[0]?.fields.facts?.entryPermission,false);
  assert.equal(d.actions[0].fields.facts.availability,'After 4 PM');
 });
+
+test('an explicit rejection clears the pending choice even when AI extraction is unavailable',async()=>{
+ const c=base(false);c.identity={role:'tenant',state:'known',tenantId:'t',propertyId:'p'};
+ c.state={activeJobId:'j',pendingSelection:{jobId:'j',choice:1,proposalVersion:4}};
+ c.messages=[{jobId:'j',reply:'Maintenance can come by Wednesday. Does that time work for you?'}];
+ c.inbound="Those times don't work. Weekdays after 4 PM instead.";
+ const intent=await interpretMessage({context:c,text:c.inbound,env:{}});
+ const d=decide(c,intent);
+ assert.equal(d.actions[0]?.type,'request_alternatives');
+ assert.equal(d.nextState.pendingSelection,undefined);
+ assert.equal(d.actions[0].fields.description,c.inbound);
+ assert.equal(d.actions[0].fields.facts.entryPermission,undefined);
+});

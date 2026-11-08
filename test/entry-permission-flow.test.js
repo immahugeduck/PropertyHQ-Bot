@@ -38,6 +38,11 @@ test('passive permission and a short yes are not answers to a scheduling questio
   assert.notEqual(intent.fields?.facts?.entryPermission,true);
  }
 });
+for(const text of ['You can enter if nobody is home, but only after 5 PM.','You have my permission to enter. But call me first.']) test(`an absence condition does not erase another access restriction: ${text}`,async()=>{
+ const context=base();context.inbound=text;
+ const intent=await interpretMessage({context,text,env:{}});
+ assert.notEqual(intent.fields?.facts?.entryPermission,true);
+});
 test('a reply to a repeated permission question uses the active repair when its log has no job id',async()=>{
  const context=base();context.messages=[{message:'Unrelated previous inbound'},{reply:question,jobId:null}];
  const intent=await interpretMessage({context,text:'Yes that is fine with me.',env:{}});
@@ -54,6 +59,13 @@ test('an unrelated new repair after an entry question is still allowed',async()=
  const context=base();context.inbound='Also, my bedroom window is broken.';
  const intent=await interpretMessage({context,text:context.inbound,env:{OPENAI_API_KEY:'fixture'},fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({type:'new_request',fields:{description:context.inbound,facts:{issue:'window_screen'}}})}}]})})});
  assert.equal(decideConversation({context,intent}).actions[0].type,'new_request');
+});
+test('a mixed permission answer and new repair cannot copy permission to the new repair',async()=>{
+ const context=base();context.inbound='You have my permission to enter. Also, the bedroom window screen is torn.';
+ const intent=await interpretMessage({context,text:context.inbound,env:{OPENAI_API_KEY:'fixture'},fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({type:'new_request',fields:{description:'Bedroom window screen is torn',facts:{issue:'window_screen',entryPermission:true}}})}}]})})});
+ const decision=decideConversation({context,intent});
+ assert.equal(decision.actions[0]?.type,'new_request');
+ assert.notEqual(decision.actions[0].fields.facts.entryPermission,true);
 });
 test('entry permission is not copied to an unrelated tenant or completed repair',async()=>{
  for(const replacement of [{...job,tenant_id:'someone-else'},{...job,status:'completed'}]) {

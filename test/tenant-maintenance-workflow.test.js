@@ -254,3 +254,88 @@ test('an occupied staff slot rejects booking without a false tenant confirmation
     assert.equal((await f.outbox(attempt.sid,c.tenantPhone)).length,0);
   } finally {await f.close();}
 });
+
+test('repeating BREE exact answer does not forward it to maintenance after the acknowledgement',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
+    await f.run(c.tenantPhone,'Yes permission granted.');
+    const before=(await f.context(c.maintenance)).jobs[0];
+    const repeated=await f.run(c.tenantPhone,'Yes permission granted.',{model:{type:'add_details',jobId:before.id,fields:{description:'Yes permission granted.',facts:{entryPermission:true}}}});
+    assert.equal((await f.outbox(repeated.sid,c.maintenance)).length,0);
+    assert.equal((await f.context(c.maintenance)).jobs[0].proposal_version,before.proposal_version);
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].coordinator_details.entryPermission,true);
+  } finally {await f.close();}
+});
+
+test('a scheduled repair update still reaches maintenance when it needs no new scheduling',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
+    const grant=await f.run(c.tenantPhone,'Yes permission granted.');
+    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
+    await f.run(c.maintenance,'Yes');
+    const job=(await f.context(c.tenantPhone)).jobs[0];
+    const text='The washer is now making a loud grinding noise.';
+    const update=await f.run(c.tenantPhone,text,{model:{type:'add_details',jobId:job.id,fields:{description:text,facts:{}}}});
+    const notice=(await f.outbox(update.sid,c.maintenance))[0];
+    assert.ok(notice);
+    assert.match(notice.body,/loud grinding noise/);
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,job.scheduled_at);
+  } finally {await f.close();}
+});
+
+test('new repair details survive alongside structured facts in the maintenance message',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Screen door needs repair',{model:{type:'new_request',fields:{description:'Screen door needs repair',facts:{issue:'screen_door'}}}});
+    const job=(await f.context(c.tenantPhone)).jobs[0];
+    const door='The main entry door also will not lock.';
+    const update=await f.run(c.tenantPhone,door,{model:{type:'add_details',jobId:job.id,fields:{description:door,facts:{mainDoorSecure:false}}}});
+    assert.match((await f.outbox(update.sid,c.maintenance))[0].body,/main entry door.*not lock/i);
+    const location='The damaged screen door is beside the basement stairs.';
+    const followup=await f.run(c.tenantPhone,location,{model:{type:'add_details',jobId:job.id,fields:{description:location,facts:{issue:'screen_door'}}}});
+    assert.match((await f.outbox(followup.sid,c.maintenance))[0].body,/basement stairs/);
+  } finally {await f.close();}
+});
+
+test('mixed alternatives and entry refusal save availability and cannot confirm the rejected time',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
+    const refusal=await f.run(c.tenantPhone,'No');
+    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[refusal.sid,c.maintenance]);
+    await f.run(c.maintenance,'Yes');
+    await f.run(c.tenantPhone,'1');
+    const job=(await f.context(c.tenantPhone)).jobs[0];
+    const text="Those times don't work. You do not have my permission to enter. Weekdays after 4 PM instead.";
+    const update=await f.run(c.tenantPhone,text,{model:{type:'request_alternatives',jobId:job.id,fields:{description:text,facts:{entryPermission:false,availability:'Weekdays after 4 PM'}}}});
+    const after=await f.context(c.tenantPhone);
+    assert.equal(after.state.pendingSelection,undefined);
+    assert.equal(after.jobs[0].coordinator_details.availability,'Weekdays after 4 PM');
+    assert.equal(after.jobs[0].coordinator_details.entryPermission,false);
+    assert.equal(after.jobs[0].stage,'rescheduling');
+    assert.match((await f.outbox(update.sid,c.maintenance))[0].body,/Weekdays after 4 PM/);
+    await f.run(c.tenantPhone,'CONFIRM');
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
+  } finally {await f.close();}
+});
+
+test('an access restriction supersedes an old grant before maintenance can book it',async()=>{
+  const f=await coordinatorFixture();
+  try {
+    await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
+    const grant=await f.run(c.tenantPhone,'Yes permission granted.');
+    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
+    const job=(await f.context(c.tenantPhone)).jobs[0];
+    const text='You can enter if nobody is home, but only after 5 PM.';
+    const restricted=await f.run(c.tenantPhone,text);
+    assert.notEqual((await f.context(c.tenantPhone)).jobs[0].coordinator_details.entryPermission,true);
+    const notice=(await f.outbox(restricted.sid,c.maintenance))[0];
+    assert.ok(notice);
+    assert.match(notice.body,/only after 5 PM/);
+    await f.run(c.maintenance,'Yes');
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
+    assert.equal((await f.context(c.tenantPhone)).jobs[0].id,job.id);
+  } finally {await f.close();}
+});

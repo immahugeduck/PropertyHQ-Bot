@@ -1,5 +1,5 @@
 import { referencedStaffJobs, selectedStaffJob, workingStaffJob } from './staff-context.js';
-import { entryConsent, isEntryPermissionQuestion } from './entry-consent.js';
+import { entryConsent, isEntryPermissionQuestion, isPassiveEntryGrant, isStandaloneEntryReply } from './entry-consent.js';
 const TYPES=['collect_contact','request_status','new_request','add_details','offer_times','choose_time','request_alternatives','start_work','report_progress','complete_work','staff_event','clarify'];
 const nullableString={type:['string','null']};
 const factsSchema = {
@@ -31,7 +31,7 @@ const schema = {
   }
 };
 export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,env=process.env,signal}) {
-  const fallback={type:'clarify',fields:{}};
+  let fallback={type:'clarify',fields:{}};
   const jobs=context.jobs || [];
   const staff=['manager','maintenance'].includes(context.identity.role);
   if(staff && /\b(?:mock|sample|example)\b.*\bschedule\b/i.test(text)) return {type:'mock_schedule',fields:{}};
@@ -58,13 +58,21 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
   if(context.identity.role==='tenant' && /^\((?:test|debug)\b[^)]*\b(?:above|below|previous|conversation|message)\b[^)]*\)$/i.test(text.trim())) return {type:'conversation_note',fields:{}};
   const issuePending=context.state?.pendingIssue;
   if(context.identity.role==='tenant' && issuePending && previous?.reply?.startsWith('Are you following up on the same repair') && (!previous.jobId || previous.jobId===issuePending.jobId) && /^(?:yes(?:[, ]+(?:same repair|that(?:'|’)s right|that is right))?|same repair|correct)[.! ]*$/i.test(text.trim()) && jobs.some(j=>j.id===issuePending.jobId && j.tenant_id===context.identity.tenantId && j.status!=='completed')) return {type:'add_details',jobId:issuePending.jobId,fields:{description:issuePending.description,facts:issuePending.facts}};
-  const consentReply=context.identity.role==='tenant'?entryConsent(text,previous?.reply || ''):undefined;
+  let consentReply=context.identity.role==='tenant'?entryConsent(text,previous?.reply || ''):undefined;
   const entryJobId=previous?.jobId || context.state?.activeJobId;
   const entryJob=jobs.find(j=>j.id===entryJobId && j.tenant_id===context.identity.tenantId && j.status!=='completed');
+  const alternatives=context.identity.role==='tenant' && entryJob && /\b(?:those|these|the|offered|proposed) (?:times|options|visits) (?:do not|don't|dont|won't|will not) work\b|\b(?:other|different|alternative|new) (?:times|options)\b|\breschedul/i.test(text);
+  if(alternatives) fallback={type:'request_alternatives',jobId:entryJob.id,fields:{description:text,facts:{}}};
   if(context.identity.role==='tenant' && entryJob) {
-    if(consentReply!==undefined) return {type:'add_details',jobId:entryJob.id,fields:{description:text,facts:{entryPermission:consentReply}}};
+    // A repetition can reaffirm an already-saved grant on this job. It cannot
+    // create permission after a different question or copy it from another job.
+    if(consentReply===undefined && entryJob.coordinator_details?.entryPermission===true && isPassiveEntryGrant(text)) consentReply=true;
+    if(consentReply!==undefined) {
+      fallback={type:alternatives?'request_alternatives':'add_details',jobId:entryJob.id,fields:{description:text,facts:{entryPermission:consentReply}}};
+      if(isStandaloneEntryReply(text)) return fallback;
+    }
     // An ambiguous answer to our entry question stays a follow-up, never a job.
-    if(isEntryPermissionQuestion(previous?.reply) && /^(?:yes|no|sure|okay|ok|maybe|perhaps|only|but)\b/i.test(text.trim()) && !/\b(?:also|another|new|separate)\b/i.test(text)) return {type:'clarify_entry',jobId:entryJob.id,fields:{description:text}};
+    if(consentReply===undefined && isEntryPermissionQuestion(previous?.reply) && /^(?:yes|no|sure|okay|ok|maybe|perhaps|only|but)\b/i.test(text.trim()) && !/\b(?:also|another|new|separate)\b/i.test(text)) return {type:'clarify_entry',jobId:entryJob.id,fields:{description:text}};
   }
   const proposed=jobs.filter(j=>j.options?.length && j.tenant_id===context.identity.tenantId && (!j.stage || j.stage==='awaiting_selection') && j.status!=='completed');
   if (context.identity.role==='tenant' && /^[123]$/.test(text.trim()) && proposed.length===1) return {type:'choose_time',jobId:proposed[0].id,fields:{choice:Number(text),proposalVersion:proposed[0].proposal_version}};
@@ -99,11 +107,14 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
       const start=intent.fields.appointmentStart,ms=Date.parse(start);
       if(Number.isFinite(ms) && /(?:Z|[+-]\d\d:\d\d)$/.test(start)) intent.fields.options=[{start,end:new Date(ms+3600000).toISOString()}];
     }
-    const consent=entryConsent(text,previous?.reply || '');
+    const consent=consentReply ?? entryConsent(text,previous?.reply || '');
     const facts=intent.fields.facts && typeof intent.fields.facts==='object' ? {...intent.fields.facts} : {};
     if(consent===undefined) delete facts.entryPermission;
     else facts.entryPermission=consent;
+    if(intent.type==='new_request' && entryJob && isEntryPermissionQuestion(previous?.reply)) delete facts.entryPermission;
     if(intent.fields.facts || consent!==undefined) intent.fields.facts=facts;
+    if(fallback.type==='request_alternatives') return {...fallback,fields:{...intent.fields,description:text,facts}};
+    if(consentReply!==undefined && entryJob && (intent.type==='clarify' || (intent.type==='new_request' && /^(?:yes|no|sure|okay|ok|only|but)\b/i.test(text.trim()) && !/\b(?:also|another|new|separate)\b/i.test(text)))) return fallback;
     // A back-reference after our entry question cannot silently open a second job.
     // When the model disagrees about the issue, ask rather than guess its scope.
     if(intent.type==='new_request' && context.identity.role==='tenant' && entryJob && isEntryPermissionQuestion(previous?.reply) && /\b(?:still|same|it['’]s|it is|that (?:issue|problem))\b/i.test(text) && !/\b(?:also|another|new|separate)\b/i.test(text)) return {type:'clarify_issue',jobId:entryJob.id,fields:{description:text,facts}};
