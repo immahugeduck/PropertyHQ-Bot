@@ -88,5 +88,16 @@ Apply the three additive migrations in order before the matching bot release:
 
 These change the saved workflow and future message generation. They do not replay
 previous outbox messages, book an old scheduling instruction, or retrospectively
-grant access on an existing tenant request. Both repositories are released from
-the tested branches to their existing production `main` branches.
+grant access on an existing tenant request.
+
+Both tested repositories have been pushed to
+`feat/tenant-maintenance-upgrades`. Production remains on its current version:
+automatic approval review rejected applying the first production migration,
+stating that permission to push code did not clearly authorize the live database
+function/schema changes and their effects on routing and scheduling. A read-only
+check confirmed that none of the three migrations was applied.
+
+The remaining release action requires explicit approval to apply all three
+migrations to the existing Property HQ production database, then release the
+matching bot and Property HQ branches to production `main`. This order keeps
+the deployed bot and database workflow compatible.
