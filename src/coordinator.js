@@ -1,4 +1,5 @@
 import { decideStaffScheduling } from './staff-scheduling.js';
+import {isReviewPending,decideManagerCommand,reviewStatus} from './manager-review.js';
 import { workingStaffJob } from './staff-context.js';
 import { repairLabel } from './tenant-language.js';
 import { mergeFacts, inspectionReply } from './intake-details.js';
@@ -15,6 +16,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(safety.response.replace(/Maintenance is being alerted now\./g,'').trim()+' I’ll try to pass this to the manager. If you need immediate help, contact emergency services.',[{type:'emergency',jobId:active?.id,fields:{description:clean(context.inbound),category:safety.category}}]);
   }
   const type = intent?.type || 'clarify', fields = intent?.fields || {};
+  if(['send_manager_reply','authorize_manager_request','manager_review_note'].includes(type)) return decideManagerCommand({context,intent,nextState});
   if (staffTypes.has(type) && !staff) return result('I can help with your maintenance request. Only our staff can make that change.');
   if (!staff && context.identity.state !== 'known') {
     if (clean(fields.name)) nextState.name = clean(fields.name);
@@ -60,6 +62,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
   if(type==='request_status') {
     const matching=intent.jobId?context.jobs.filter(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)):context.jobs;
     const open=matching.filter(j=>j.status!=='completed');
+    if(!staff && open.length===1 && isReviewPending(open[0])) return result(reviewStatus(open[0]));
     if(!staff && open.length===1 && !open[0].scheduled_at) {
       const job=open[0];nextState.activeJobId=job.id;
       if(job.stage==='awaiting_selection' && job.options?.some(o=>Date.parse(o.flexible?o.end:o.start)>+now)) return result(`Maintenance has offered these times for the ${repairLabel(job)}: ${optionText(job.options,context.settings.timezone)}. Which option works for you?`);
@@ -72,11 +75,12 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(type==='approve_contact'?'Contact link recorded. Future messages will use that tenant’s property.':'Contact link removed. Future messages will require verification.',[{type,fields:{phone:fields.phone,tenantId:fields.tenantId || null}}]);
   }
   const followUp={when_started:'When did this start?',where_in_home:'Where in your home is this happening?',photo:'Could you send a photo if it’s safe to take one?'}[fields.nextQuestion] || '';
-  if (type==='new_request') {
+  if (type==='new_request' || type==='request_manager_review') {
     if (staff) return result('Please ask the tenant to report the issue, or use PropertyHQ to create it for them.');
     if (!context.identity.propertyId) return result('I need our team to confirm which property belongs to your contact before filing this request.');
     if (!clean(fields.description)) return result(`Hi ${context.identity.name || 'there'}! What’s happening with the maintenance issue?`);
     const facts=mergeFacts({},fields.facts);
+    if(type==='request_manager_review') return result('Thanks! I’ll pass your request to your property manager for review and get back to you.',[{type,fields:{description:clean(fields.description),facts}}]);
     const reply=inspectionReply({facts,isNew:true,name:context.identity.name,followUp});
     return result(reply,[{type,fields:{description:clean(fields.description),category:safety?.category || 'general_maintenance',facts,requestScheduling:true}}]);
   }
@@ -88,6 +92,16 @@ export function decideConversation({ context: original, intent, safety, now = ne
   if (!job) return result(context.jobs.length ? (staff?'Which request is this about? Please include its job number, or tell me it’s a new issue.':'Which repair are you following up on, or is this something new?') : `Hi ${context.identity.name || 'there'}! What maintenance problem can I help with?`);
   nextState.activeJobId=job.id;
   const action = f=>[{type,jobId:job.id,fields:f}];
+  if(isReviewPending(job)) {
+    if(!staff && type==='acknowledge_review') {
+      const reply=job.coordinator_review_status==='awaiting_tenant_response' && /\b(?:quote|estimate)\b/i.test(job.coordinator_manager_reply||'')
+        ? 'You’re welcome. If you decide to move forward, send the quote here and I’ll pass it along to your property manager for review.'
+        : 'You’re welcome. Just message us here if you have another update.';
+      return result(reply,[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound),notifyManager:false}}]);
+    }
+    if(!staff && ['add_details','request_alternatives'].includes(type)) return result('Thanks, I’ll pass that update to your property manager for review.',[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),notifyManager:true}}]);
+    return result('This request is awaiting manager review and approval before maintenance can arrange a visit.');
+  }
   if(type==='clarify_issue' && !staff) {
     const facts=mergeFacts({},fields.facts);delete facts.entryPermission;
     nextState.pendingIssue={jobId:job.id,description:clean(fields.description),facts};
@@ -121,6 +135,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
   }
   if (type==='start_work' || type==='complete_work' || type==='report_progress') {
     if (job.status==='completed' && type!=='complete_work') return result('That job is completed. Please clarify whether a new request is needed.');
+    if(type==='complete_work' && job.coordinator_review_status==='inspection_authorized') return result('Inspection recorded. I’ll send the findings to the manager for review before any installation or work is approved.',[{type:'complete_inspection',jobId:job.id,fields:{description:clean(fields.description)||clean(context.inbound)}}]);
     return result(`Recorded for #${job.job_number}. Notifications are queued for the manager and any verified tenant contact.`,action({description:clean(fields.description)}));
   }
   if (type==='add_details') {

@@ -1,6 +1,8 @@
 import {validOptions,optionText} from './appointments.js';
+import {isReviewPending} from './manager-review.js';
 export function decideStaffScheduling({context,job,type,fields,nextState,now}) {
  const result=(reply,actions=[])=>({reply,actions,nextState});
+ if(isReviewPending(job)) return result('This request is awaiting manager review and approval before maintenance scheduling.');
  const permission=job.coordinator_details?.entryPermission;
  const label=`${job.tenant_name || 'the tenant'} (#${job.job_number})${job.address?` at ${job.address}`:''}`;
  const expected=permission===true?1:3;
