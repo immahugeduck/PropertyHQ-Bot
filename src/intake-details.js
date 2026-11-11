@@ -8,6 +8,17 @@ export function mergeFacts(previous = {}, incoming = {}) {
     if (typeof incoming?.[key] === 'boolean') facts[key] = incoming[key];
   }
   if (typeof incoming?.availability === 'string' && incoming.availability.trim()) facts.availability = incoming.availability.trim().slice(0,500);
+  for(const [key,limit] of [['repairSummary',240],['accessNotes',400]]) {
+    if(typeof incoming?.[key]==='string' && incoming[key].trim()) {
+      let value=incoming[key].replace(/\s+/g,' ').trim().slice(0,limit);
+      const prior=typeof previous?.[key]==='string'?previous[key].trim():'';
+      if(key==='accessNotes' && prior) {
+        if(prior.toLowerCase().includes(value.toLowerCase())) value=prior;
+        else if(!value.toLowerCase().includes(prior.toLowerCase())) value=prior+' '+value;
+      }
+      facts[key]=value;
+    }
+  }
   return facts;
 }
 export function inspectionReply({facts,scheduled=false,isNew=false,name,followUp=''}) {

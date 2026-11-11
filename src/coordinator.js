@@ -4,7 +4,7 @@ import { workingStaffJob } from './staff-context.js';
 import { repairLabel } from './tenant-language.js';
 import { mergeFacts, inspectionReply } from './intake-details.js';
 import { validOptions, optionText, formatWhen, summarizeJobs } from './appointments.js';
-const staffTypes = new Set(['request_times','approve_suggestions','related_jobs','staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
+const staffTypes = new Set(['request_times','approve_suggestions','schedule_visit','related_jobs','staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
 const clean = value => typeof value === 'string' ? value.trim().slice(0,1500) : '';
 export function decideConversation({ context: original, intent, safety, now = new Date() }) {
   const staff = ['maintenance','manager'].includes(original.identity.role);
@@ -18,6 +18,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
   const type = intent?.type || 'clarify', fields = intent?.fields || {};
   if(['send_manager_reply','authorize_manager_request','manager_review_note'].includes(type)) return decideManagerCommand({context,intent,nextState});
   if (staffTypes.has(type) && !staff) return result('I can help with your maintenance request. Only our staff can make that change.');
+  if(staff && type==='clarify' && fields.scheduleClarification) return result(fields.scheduleClarification==='daypart'?'Please confirm whether you mean morning or evening, and the exact visit time.':'Please give me a future day and exact time for that visit.');
   if (!staff && context.identity.state !== 'known') {
     if (clean(fields.name)) nextState.name = clean(fields.name);
     if (clean(fields.address)) nextState.address = clean(fields.address);
@@ -84,13 +85,14 @@ export function decideConversation({ context: original, intent, safety, now = ne
     const reply=inspectionReply({facts,isNew:true,name:context.identity.name,followUp});
     return result(reply,[{type,fields:{description:clean(fields.description),category:safety?.category || 'general_maintenance',facts,requestScheduling:true}}]);
   }
-  const job = staff ? workingStaffJob(context,context.inbound,intent?.jobId) : intent?.jobId ? context.jobs.find(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)) : context.jobs.length===1 ? context.jobs[0] : null;
+  const job = staff ? workingStaffJob(context,context.inbound,intent?.jobId,type) : intent?.jobId ? context.jobs.find(j=>j.id===intent.jobId || String(j.job_number)===String(intent.jobId)) : context.jobs.length===1 ? context.jobs[0] : null;
   if(staff && type==='offer_times' && !job && validOptions(fields.options,now)) {
     nextState.pendingStaffOffer={options:fields.options};
     return result(`I have ${optionText(fields.options,context.settings.timezone)}. Which repair should I use? You can give me the tenant’s name, address or job number.`);
   }
   if (!job) return result(context.jobs.length ? (staff?'Which request is this about? Please include its job number, or tell me it’s a new issue.':'Which repair are you following up on, or is this something new?') : `Hi ${context.identity.name || 'there'}! What maintenance problem can I help with?`);
   nextState.activeJobId=job.id;
+  if(staff && nextState.pendingOptions?.jobId && nextState.pendingOptions.jobId!==job.id) delete nextState.pendingOptions;
   const action = f=>[{type,jobId:job.id,fields:f}];
   if(isReviewPending(job)) {
     if(!staff && type==='acknowledge_review') {
@@ -108,7 +110,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(`Are you following up on the same repair—the ${repairLabel(job)}?`);
   }
   if(type==='clarify_entry' && !staff) return result('I want to make sure I record your entry preference correctly. Does maintenance have permission to enter while nobody is home?',[{type:'add_details',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),requestScheduling:false,notifyMaintenance:false}}]);
-  if(['offer_times','confirm_options','request_times','approve_suggestions'].includes(type)) return decideStaffScheduling({context,job,type,fields,nextState,now});
+  if(['offer_times','confirm_options','request_times','approve_suggestions','schedule_visit'].includes(type)) return decideStaffScheduling({context,job,type,fields,nextState,now});
   if (type==='choose_time' || type==='select_time') {
     if (staff) return result('The tenant needs to choose one of the proposed options.');
     if (fields.proposalVersion!==job.proposal_version || !Number.isInteger(fields.choice) || !job.options?.[fields.choice-1] || Date.parse(job.options[fields.choice-1].start)<=+now) return result('That option is no longer available. Please choose from the current proposal or ask for alternatives.');
@@ -146,7 +148,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     }
     const facts=mergeFacts(job.coordinator_details,fields.facts);
     const incoming=mergeFacts({},fields.facts);
-    if(typeof incoming.entryPermission==='boolean' && Object.keys(incoming).length===1) {
+    if(typeof incoming.entryPermission==='boolean' && Object.keys(incoming).every(k=>['entryPermission','accessNotes'].includes(k))) {
       const acknowledgement=incoming.entryPermission
         ? 'Thanks, I’ve recorded your permission to enter while nobody is home.'
         : 'Thanks, I’ve recorded that maintenance must arrange entry permission with you.';

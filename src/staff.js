@@ -102,7 +102,9 @@ export function parseScheduleTime(text, now, timeZone) {
     dayGiven = true;
     if (month < today.month || (month === today.month && day < today.day)) year += 1;
   } else if (weekday >= 0) {
-    addDays = (weekday - today.weekday + 7) % 7 || 7;
+    addDays = /\bthis\s+(?:sun|mon|tue|wed|thu|fri|sat)/.test(lower)
+      ? ((weekday+6)%7)-((today.weekday+6)%7)
+      : (weekday - today.weekday + 7) % 7 || 7;
     dayGiven = true;
   }
 

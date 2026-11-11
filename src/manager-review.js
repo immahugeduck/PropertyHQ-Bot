@@ -61,7 +61,7 @@ export function managerInternalNote({context,text,intent}) {
   if(context.identity.role!=='manager' || !(context.jobs||[]).some(isReviewPending)) return;
   if(['request_status','staff_event'].includes(intent?.type)) return;
   if(/^(?:what|what's|when|where|show|list|check)\b|\bstatus\b/i.test(text)) return;
-  const job=workingStaffJob(context,text,intent?.jobId);
+  const job=workingStaffJob(context,text,intent?.jobId,intent?.type);
   if(job && !isReviewPending(job)) return;
   return {type:'manager_review_note',jobId:job?.id,fields:{description:text}};
 }

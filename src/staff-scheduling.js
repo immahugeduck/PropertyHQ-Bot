@@ -1,7 +1,7 @@
 import {validOptions,optionText} from './appointments.js';
 import {isReviewPending} from './manager-review.js';
 export function decideStaffScheduling({context,job,type,fields,nextState,now}) {
- const result=(reply,actions=[])=>({reply,actions,nextState});
+ const result=(reply,actions=[])=>({reply,actions,nextState,replyJobId:job.id});
  if(isReviewPending(job)) return result('This request is awaiting manager review and approval before maintenance scheduling.');
  const permission=job.coordinator_details?.entryPermission;
  const label=`${job.tenant_name || 'the tenant'} (#${job.job_number})${job.address?` at ${job.address}`:''}`;
@@ -28,6 +28,11 @@ export function decideStaffScheduling({context,job,type,fields,nextState,now}) {
   nextState.pendingOptions={jobId:job.id,options,entryPermission:undefined};
   return result(`I’ve kept ${optionText(options,context.settings.timezone)} for ${label}. Entry permission is still pending; I’ll wait for the tenant’s answer before arranging the visit.`);
  }
+ const proposalOptions=type==='approve_suggestions'?options:undefined;
+ if(permission===true && type==='approve_suggestions' && options.length>1) {
+  if(!Number.isInteger(fields.choice) || !options[fields.choice-1]) return result(`Which visit should I book for ${label}? ${optionText(options,context.settings.timezone)}. Reply 1, 2 or 3.`);
+  options=[options[fields.choice-1]];
+ }
  if(permission===false && options.length!==3) return result(`${label} needs to be home, so I need three visit options to offer them. You can ask me to suggest times from the recorded calendar.`);
  if(permission===true && (options.some(o=>o.flexible) || options.length!==1)) {
   if(options.some(o=>o.flexible)) return result('Entry is permitted. Please confirm one exact visit time within that availability.');
@@ -40,6 +45,6 @@ export function decideStaffScheduling({context,job,type,fields,nextState,now}) {
   return result(`For ${label}: ${optionText(options,context.settings.timezone)}. ${permission?'Entry is permitted while nobody is home. Shall I book this visit?':'Shall I send these three visit options to the tenant?'}`);
  }
  delete nextState.pendingOptions;
- const action={type:permission?'book_visit':'offer_times',jobId:job.id,fields:{options,...(type==='approve_suggestions'?{proposalVersion:fields.proposalVersion}:{})}};
+ const action={type:permission?'book_visit':'offer_times',jobId:job.id,fields:{options,...(type==='approve_suggestions'?{proposalVersion:fields.proposalVersion,...(permission && proposalOptions.length>1?{proposalOptions}:{})}:{})}};
  return result(permission?`The visit for ${label} is scheduled. I’ll notify the tenant and keep you updated.`:`I’ve recorded the three options for ${label}. I’ll send them to the tenant to choose.`,[action]);
 }

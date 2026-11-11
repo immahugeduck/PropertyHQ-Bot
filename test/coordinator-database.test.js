@@ -27,6 +27,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261107030000_permission_led_scheduling.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261108181500_tenant_maintenance_handoff.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111003933_manager_review_replies.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261111214912_context_followup.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -48,7 +49,8 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await commit(from,2,[{type:'new_request',fields:{description:'Different issue'}}]);
  const second=(await ctx(from)).jobs.find(j=>j.id!==job).id;
  await commit(maintenance,1,[{type:'offer_times',jobId:second,fields:{options}}]);
- await assert.rejects(commit(from,3,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:1}}]),/unavailable/);
+ const secondVersion=(await ctx(from)).jobs.find(j=>j.id===second).proposal_version;
+ await assert.rejects(commit(from,3,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:secondVersion}}]),/unavailable/);
  assert.equal((await ctx(from)).version,3);
  await commit(manager,0,[{type:'complete_work',jobId:job,fields:{}}]);
  assert.equal((await ctx(from)).jobs.find(j=>j.id===job).status,'completed');
@@ -120,7 +122,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const formRows=(await db.query("select to_number,body from public.coordinator_outbox where event_sid=$1",['app-maintenance:'+form.id])).rows;
  await db.query("update public.coordinator_outbox set status='sent' where event_sid=$1",['app-maintenance:'+form.id]);
  const formHistory=(await ctx(secondPhone)).messages;assert.ok(formHistory.some(m=>m.jobId===form.id && /permission to enter/i.test(m.reply||'')));assert.equal(formHistory[0].jobId,form.id);assert.match(formHistory[0].reply,/permission to enter/i);
- assert.equal(formRows.length,3);assert.ok(formRows.some(r=>r.to_number===maintenance && /permission.*pending/i.test(r.body)));assert.ok(formRows.some(r=>r.to_number===manager));
+ assert.equal(formRows.length,3);assert.ok(formRows.some(r=>r.to_number===maintenance && /permission.*TBD/i.test(r.body)));assert.ok(formRows.some(r=>r.to_number===manager));
  assert.ok(formRows.some(r=>r.to_number===secondPhone && /received your/i.test(r.body)));
  assert.doesNotMatch(formRows.find(r=>r.to_number===secondPhone).body,/#\d+|request #/);
  assert.match(formRows.find(r=>r.to_number===maintenance).body,/#\d+/);

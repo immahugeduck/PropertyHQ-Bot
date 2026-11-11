@@ -21,7 +21,7 @@ test('BREE raw permission answer survives commit and context reload on one ticke
     assert.ok(notices.some(n=>n.to_number===c.maintenance));
     assert.ok(notices.some(n=>n.to_number===c.manager));
     for(const notice of notices) {
-      assert.match(notice.body,/permission to enter.*(?:confirmed|granted)/i);
+      assert.match(notice.body,/permission to enter.*(?:YES|confirmed|granted)/i);
       assert.doesNotMatch(notice.body,/not yet confirmed|permission is pending/i);
     }
   } finally {await f.close();}
@@ -42,9 +42,9 @@ test('maintenance gets one work order while the manager receives the tenant cont
     assert.equal((maintenance.body.match(new RegExp('#'+job.job_number+'\\b','g'))||[]).length,1);
     assert.match(maintenance.body,/508 Fixture St/);
     assert.match(maintenance.body,/washer.*basement|basement.*washer/i);
-    assert.match(maintenance.body,/permission to enter.*granted/i);
+    assert.match(maintenance.body,/permission to enter.*YES/i);
     assert.doesNotMatch(maintenance.body,/Yes permission granted|Update for|New request.*from/i);
-    assert.match(maintenance.body,/Shall I book this visit\?$/);
+    assert.match(maintenance.body,/Reply 1, 2 or 3/);
     assert.ok(maintenance.schedule_proposal?.proposalVersion);
     assert.match(manager.body,/Yes permission granted/);
     assert.doesNotMatch(manager.body,/Shall I book/);
@@ -87,7 +87,7 @@ test('a form-created repair uses the same simple maintenance handoff and manager
     assert.ok(staff);
     assert.equal((staff.body.match(new RegExp('#'+row.job_number+'\\b','g'))||[]).length,1);
     assert.match(staff.body,/Bedroom window screen is torn/);
-    assert.match(staff.body,/permission to enter.*(?:pending|not yet confirmed)/i);
+    assert.match(staff.body,/permission to enter.*TBD/i);
     assert.ok(notices.some(n=>n.to_number===c.tenantPhone && /received.*request/i.test(n.body)));
   } finally {await f.close();}
 });
@@ -98,7 +98,7 @@ test('a revocation after booking reaches maintenance with the current entry rest
     await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
     const grant=await f.run(c.tenantPhone,'Yes permission granted.');
     await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
-    const booked=await f.run(c.maintenance,'Yes');
+    const booked=await f.run(c.maintenance,'1');
     assert.match(booked.reply,/scheduled/);
     const before=(await f.context(c.tenantPhone)).jobs[0];
     assert.ok(before.scheduled_at);
@@ -108,7 +108,7 @@ test('a revocation after booking reaches maintenance with the current entry rest
     assert.equal(after.scheduled_at,before.scheduled_at);
     const notice=(await f.outbox(revoked.sid,c.maintenance))[0];
     assert.ok(notice);
-    assert.match(notice.body,/not granted; arrange access/i);
+    assert.match(notice.body,/NO; arrange access/i);
     assert.match(notice.body,/Visit:/);
     assert.doesNotMatch(notice.body,/home: granted|Shall I book/);
   } finally {await f.close();}
@@ -140,7 +140,7 @@ test('washer workflow books only after maintenance approval, then recalls and co
     assert.equal(proposal.stage,'awaiting_staff');
     assert.equal(proposal.scheduled_at,null,'tenant permission alone must not book');
     await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[granted.sid,c.maintenance]);
-    const booking=await f.run(c.maintenance,'Yes, please.');
+    const booking=await f.run(c.maintenance,'1');
     assert.match(booking.reply,/scheduled/);
     const saved=(await f.context(c.tenantPhone)).jobs[0];
     assert.equal(Date.parse(saved.scheduled_at),Date.parse(proposal.options[0].start));
@@ -247,7 +247,7 @@ test('an occupied staff slot rejects booking without a false tenant confirmation
     const proposal=(await f.context(c.maintenance)).jobs[0];
     await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
     await f.db.query("insert into public.maintenance_requests(user_id,property_id,title,description,source,scheduled_at) values($1,$2,'Other repair','Already booked','sms',$3)",[c.user,c.property,proposal.options[0].start]);
-    const attempt=await f.run(c.maintenance,'Yes');
+    const attempt=await f.run(c.maintenance,'1');
     assert.match(attempt.reply,/couldn’t save/i);
     const actual=(await f.context(c.tenantPhone)).jobs.find(j=>j.id===proposal.id);
     assert.equal(actual.scheduled_at,null);

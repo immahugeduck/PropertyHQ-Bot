@@ -76,7 +76,7 @@ test('address clarification does not confuse a street number with someone elseâ€
  const i=await interpretMessage({context:c,text:'1007 Oak',env:{}});const d=decide(c,i);assert.equal(d.nextState.pendingOptions.jobId,'two');
 });
 test('a single exact staff time parsed outside options becomes one consistent internal reservation',async()=>{
- const c=base();const i=await interpretMessage({context:c,text:'Schedule for Monday at 9:30 am',env:{OPENAI_API_KEY:'fixture'},fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({type:'offer_times',jobId:'one',fields:{appointmentStart:'2026-11-09T09:30:00-05:00',appointmentEnd:'2026-11-07T10:30:00-05:00',options:null}})}}]})})});
+ const c=base();const i=await interpretMessage({context:c,text:'Schedule for Monday at 9:30 am',now,env:{OPENAI_API_KEY:'fixture'},fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({type:'offer_times',jobId:'one',fields:{appointmentStart:'2026-11-09T09:30:00-05:00',appointmentEnd:'2026-11-07T10:30:00-05:00',options:null}})}}]})})});
  assert.equal(Date.parse(i.fields.options[0].start),Date.parse('2026-11-09T14:30:00Z'));assert.equal(Date.parse(i.fields.options[0].end),Date.parse('2026-11-09T15:30:00Z'));
 });
 for(const text of ['I can visit Monday after 9:30 am','Monday or Tuesday at 9:30 am']) test(`broad or alternative staff availability is not recovered as an exact appointment: ${text}`,async()=>{

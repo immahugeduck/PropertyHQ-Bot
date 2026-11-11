@@ -8,6 +8,13 @@ export function isPassiveEntryGrant(text) {
 export function isStandaloneEntryReply(text) {
   const answer=normalizeAnswer(text);
   if(isPassiveEntryGrant(text) || shortAgreement.test(answer) || /^no(?: thanks| thank you)?$/i.test(answer) || /^permission(?: is)? (?:not granted|denied|revoked)$/i.test(answer)) return true;
+  const clauses=(text.match(/[^.!?;\n]+[.!?;\n]?/g)||[]).map(c=>c.trim());
+  const first=clauses[0] || '',comma=first.indexOf(',');
+  const leading=comma<0?first:first.slice(0,comma);
+  const petNotes=[...(comma<0?[]:[first.slice(comma+1)]),...clauses.slice(1)];
+  if(shortAgreement.test(normalizeAnswer(leading)) && petNotes.length && !first.endsWith('?')
+    && petNotes.some(c=>/\b(?:cat|dog|pet)\b/i.test(c))
+    && petNotes.every(c=>/\b(?:cat|dog|pet)\b/i.test(c) || /^(?:he|she|they|it)\b/i.test(c))) return true;
   // Only bounded access answers bypass extraction. A second request, location,
   // availability or other instruction must still be interpreted in full.
   return /^(?:(?:yes|no) )?(?:(?:you|maintenance|they) (?:(?:do not|don't|dont) )?(?:have|has) (?:(?:my|our) )?permission(?: to enter)?|(?:i|we) (?:(?:do not|don't|dont) )?(?:give|grant) (?:you )?permission(?: to enter)?|(?:you|maintenance|they) (?:can|may|cannot|can't|cant|may not) enter|(?:please )?(?:do not|don't|dont|never) enter)(?: (?:if|when|while) (?:(?:nobody|no one)(?: is)?(?: at)? home|(?:i am|i'm|we are|we're) (?:away|not home)))?$/i.test(answer);
@@ -15,15 +22,26 @@ export function isStandaloneEntryReply(text) {
 export function isEntryPermissionQuestion(reply = '') {
   return /permission.*enter|may.*enter/i.test(reply) && (reply.match(/\?/g) || []).length === 1;
 }
+export function entryAccessNotes(text='') {
+  const clauses=text.match(/[^.!?;\n]+[.!?;\n]?/g) || [];
+  const notes=[];
+  for(const clause of clauses) {
+    if(/\b(?:cats?|dogs?|pets?|gate|lockbox|keys?)\b|\b(?:call|text|contact|notify|ask|check with)\b.*\b(?:first|before)\b|\b(?:only|not until)\b/i.test(clause)
+      || (notes.length && /^\s*(?:he|she|they|it)\b/i.test(clause))) notes.push(clause.trim());
+  }
+  return notes.length?notes.join(' ').replace(/\s+/g,' ').trim().slice(0,400):undefined;
+}
 export function entryConsent(text, priorReply = '') {
   text = text.replace(/’/g,"'");
   const asked = isEntryPermissionQuestion(priorReply);
   const clauses = text.match(/[^.!?;\n]+[.!?;\n]?/g) || [];
-  const relevant = clauses.filter(c => /\bpermission\b|\benter\b|let (?:yourself|themselves) in/i.test(c));
-  const denied = /\b(?:do not|don't|dont|never)\s+(?:enter|let (?:yourself|themselves) in)\b|\b(?:do not|don't|dont)\s+(?:have|give|grant)\s+(?:you\s+)?(?:(?:my|our)\s+)?permission\b|\b(?:cannot|can't|cant|may not|not allowed to)\s+enter\b|\bno permission\b|\b(?:never said|didn't say|did not say|no longer|not anymore|not now)\b/i;
+  const relevant = clauses.filter(c => /\bpermission\b|\benter\b|\b(?:come|go) (?:in|inside)\b|let (?:yourself|themselves) in/i.test(c));
+  const denied = /\b(?:do not|don't|dont|never)\s+(?:enter|(?:come|go) (?:in|inside)|let (?:yourself|themselves) in)\b|\b(?:do not|don't|dont)\s+(?:have|give|grant)\s+(?:you\s+)?(?:(?:my|our)\s+)?permission\b|\b(?:cannot|can't|cant|may not|not allowed to)\s+(?:enter|(?:come|go) (?:in|inside))\b|\bno permission\b|\b(?:never said|didn't say|did not say|no longer|not anymore|not now)\b/i;
   const conditional = /\b(?:if|unless|when|provided|only|after|before|until)\b/i;
   const absent = /\b(?:if|when)\s+(?:nobody|no one)(?:\s+is)?\s+(?:at\s+)?home\b/gi;
   if (relevant.some(c => denied.test(c))) return false;
+  if (asked && (denied.test(text) || /\b(?:not really|not sure|do not agree|don't agree)\b/i.test(text))) return false;
+  if ((asked || relevant.length) && /\b(?:wait for (?:me|us)|(?:need|have|must) to wait)\b/i.test(text)) return false;
   if (relevant.some(c => /\bpermission(?: is)? (?:not granted|denied|revoked)\b/i.test(c))) return false;
   if ((asked || relevant.length) && /\b(?:need|have|want) to be (?:there|home)|\bonly (?:if|when).*(?:home|there)\b/i.test(text)) return false;
   if ((asked || relevant.length) && /\b(?:call|text|contact|notify|ask|check with)\b[^.!?;\n]*\b(?:first|before)\b/i.test(text)) return false;
@@ -40,6 +58,8 @@ export function entryConsent(text, priorReply = '') {
   // general authorization inferred from a mention of permission elsewhere.
   if (asked && isPassiveEntryGrant(text)) return true;
   if (asked && shortAgreement.test(answer)) return true;
+  const first=clauses[0]?.trim() || '';
+  if (asked && !first.endsWith('?') && shortAgreement.test(normalizeAnswer(first.split(',')[0]))) return true;
   if (asked && /^no(?: thanks| thank you)?$/i.test(answer)) return false;
   return undefined;
 }

@@ -171,7 +171,7 @@ test('inspection authorization starts access coordination, while completion retu
   await f.db.query("update public.coordinator_outbox set status='sent' where id=$1",[prompt.id]);
   const grant=await f.run(c.tenantPhone,'Yes permission granted.');
   await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
-  await f.run(c.maintenance,'Yes');
+  await f.run(c.maintenance,'1');
   job=(await f.context(c.tenantPhone)).jobs[0];assert.ok(job.scheduled_at);
   const finished=await f.run(c.maintenance,'Inspection complete, a plumber would need to install the line.',{model:{type:'complete_work',jobId:job.id,fields:{description:'Inspection complete; plumber needed for installation.'}}});
   job=(await f.context(c.tenantPhone)).jobs[0];
@@ -234,7 +234,7 @@ test('a tenant entry refusal during manager review is saved before inspection au
   current=(await f.context(c.tenantPhone)).jobs[0];assert.equal(current.coordinator_details.entryPermission,false);
   const approval=await f.run(c.manager,'APPROVE INSPECTION');
   const order=(await f.outbox(approval.sid,c.maintenance))[0].body;
-  assert.match(order,/not granted; arrange access/);assert.doesNotMatch(order,/Entry is permitted|Permission.*: granted/);
+  assert.match(order,/NO; arrange access/);assert.doesNotMatch(order,/Entry is permitted|permission.*: YES/i);
   assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
  } finally {await f.close();}
 });

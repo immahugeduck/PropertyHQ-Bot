@@ -26,6 +26,7 @@ test('permission-led SQL: private suggestions, conflicts and staff-only booking'
  await db.exec(await sqlFile('supabase/migrations/20261107030000_permission_led_scheduling.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261108181500_tenant_maintenance_handoff.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111003933_manager_review_replies.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261111214912_context_followup.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -38,12 +39,12 @@ test('permission-led SQL: private suggestions, conflicts and staff-only booking'
  await commit(from,0,[{type:'new_request',fields:{description:'Washer leak',facts:{issue:'washer',entryPermission:true}}}],{},'SMpermNew');
  const job=(await ctx(from)).jobs[0];
  const staffJob=(await ctx(maintenance)).jobs.find(j=>j.id===job.id);
- assert.equal(staffJob.stage,'awaiting_staff');assert.equal(staffJob.options.length,1);
+ assert.equal(staffJob.stage,'awaiting_staff');assert.equal(staffJob.options.length,3);
  assert.equal((await ctx(from)).jobs[0].options,null,'private suggestions must not reach tenant context');
  const slot=staffJob.options[0];const version=staffJob.proposal_version;
  await assert.rejects(commit(from,1,[{type:'book_visit',jobId:job.id,fields:{options:[slot],proposalVersion:version}}]),/staff only/);
  await db.query("update public.coordinator_outbox set status='sent' where event_sid='SMpermNew' and to_number=$1",[maintenance]);
- const approved=await run(maintenance,'Yes, please.','SMstaffBook');assert.match(approved,/scheduled/);
+ const approved=await run(maintenance,'1','SMstaffBook');assert.match(approved,/scheduled/);
  assert.equal((await ctx(from)).jobs[0].stage,'confirmed');assert.ok((await ctx(from)).jobs[0].scheduled_at);
  const notice=(await db.query("select body from public.coordinator_outbox where event_sid='SMstaffBook' and tenant_id=$1",[tenant])).rows[0].body;
  assert.match(notice,/scheduled/i);assert.doesNotMatch(notice,/#\d+|which|choose|Does.*permission|May.*enter/i);
@@ -72,7 +73,7 @@ test('permission-led SQL: private suggestions, conflicts and staff-only booking'
  // Asking for alternatives cannot expose previously private staff-only suggestions.
  const v=(await ctx(from)).version;
  await commit(from,v,[{type:'new_request',fields:{description:'Private alternative fixture',facts:{entryPermission:true}}}],{},'SMprivateAlternative');
- const privateJob=(await ctx(maintenance)).jobs.find(j=>j.description==='Private alternative fixture');assert.equal(privateJob.options.length,1);
+ const privateJob=(await ctx(maintenance)).jobs.find(j=>j.description==='Private alternative fixture');assert.equal(privateJob.options.length,3);
  await commit(from,v+1,[{type:'request_alternatives',jobId:privateJob.id,fields:{description:'I need another time'}}],{},'SMprivateAlternativeReply');
  assert.deepEqual((await ctx(from)).jobs.find(j=>j.id===privateJob.id).options,[]);
  // Free-slot generation observes working days, staff events and date-only portal commitments.
