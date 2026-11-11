@@ -115,6 +115,36 @@ test('an acknowledgement followed by a new concern still reaches the manager',as
  const d=await run(c,text,{type:'add_details',jobId:'review-1',fields:{description:text}});
  assert.equal(d.actions[0]?.type,'review_followup');assert.equal(d.actions[0].fields.notifyManager,true);
 });
+
+test('a review acknowledgement cannot swallow another repair’s visit confirmation',async()=>{
+ const options=[{start:'2030-01-02T15:00:00Z',end:'2030-01-02T16:00:00Z'}];
+ const repair=job({id:'repair-2',job_number:1002,coordinator_review_status:null,description:'Kitchen faucet leak',options,proposal_version:1,stage:'awaiting_selection'});
+ const c=context('tenant',[job(),repair]);c.state={activeJobId:repair.id,pendingSelection:{jobId:repair.id,choice:1,proposalVersion:1}};
+ c.messages=[{reply:'Maintenance can come by Wednesday at 10 AM. Does that time work for you?',jobId:repair.id}];
+ const d=await run(c,'Sounds good');
+ assert.equal(d.actions[0]?.type,'select_time');assert.equal(d.actions[0].jobId,repair.id);
+});
+
+test('entry restrictions remain facts while a request waits for manager review',async()=>{
+ const c=context('tenant',[job({coordinator_details:{issue:'other',entryPermission:true}})]);
+ const d=await run(c,'Do not enter');
+ assert.equal(d.actions[0]?.type,'review_followup');assert.equal(d.actions[0].fields.facts.entryPermission,false);
+ assert.equal(d.actions[0].fields.notifyManager,true);
+});
+
+test('a pending review does not intercept an ordinary manager progress update',async()=>{
+ const repair=job({id:'repair-2',job_number:1002,coordinator_review_status:null,description:'Kitchen faucet leak'});
+ const c=context('manager',[job(),repair]);
+ const text='The parts for Bree’s kitchen faucet are ordered.';
+ const d=await run(c,text,{type:'report_progress',jobId:repair.id,fields:{description:'The faucet parts are ordered.'}});
+ assert.equal(d.actions[0]?.type,'report_progress');assert.equal(d.actions[0].jobId,repair.id);
+});
+
+test('a pending review preserves model interpretation of staff-only calendar entries',async()=>{
+ const c=context('manager');
+ const d=await run(c,'Put a staff inspection on Tuesday at 2 PM.',{type:'staff_event',fields:{eventTitle:'Staff inspection',appointmentStart:'2030-01-08T19:00:00Z'}});
+ assert.equal(d.actions[0]?.type,'staff_event');
+});
 test('a manager status question remains a read rather than an internal-note instruction',async()=>{
  const c=context('manager');
  const d=await run(c,'What is the status of request #1001?',{type:'request_status',jobId:'review-1',fields:{}});

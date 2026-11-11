@@ -94,7 +94,7 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
   if (context.identity.role==='unknown' && context.state?.awaiting==='name' && !context.state?.name) return {type:'collect_contact',fields:{name:text.trim().slice(0,150)}};
   if (context.identity.role==='unknown' && context.state?.awaiting==='address' && !context.state?.address && /\d/.test(text)) return {type:'collect_contact',fields:{address:text.trim().slice(0,300)}};
   const internal=managerInternalNote({context,text});
-  if(internal) return internal;
+  if(internal) fallback=internal;
   // API keys contain no whitespace; tolerate copy/paste wrapping without changing storage.
   const apiKey=String(env.OPENAI_API_KEY || '').replace(/\s+/g,'');
   if (!apiKey) return fallback;
@@ -104,6 +104,8 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
     if (!res.ok) return fallback;
     const data=await res.json();const intent=JSON.parse(data.choices?.[0]?.message?.content || '{}');
     if (!TYPES.includes(intent.type) || !intent.fields || typeof intent.fields!=='object' || Array.isArray(intent.fields)) return fallback;
+    const reviewNote=managerInternalNote({context,text,intent});
+    if(reviewNote) return reviewNote;
     // The schema also carries appointmentStart for tenant choices. Recover a
     // single explicit staff visit if the model placed it there instead of options.
     // Reserve one internal hour from the start; no end time was promised by staff.

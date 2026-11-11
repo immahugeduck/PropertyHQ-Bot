@@ -99,7 +99,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
         : 'You’re welcome. Just message us here if you have another update.';
       return result(reply,[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound),notifyManager:false}}]);
     }
-    if(!staff && ['add_details','request_alternatives'].includes(type)) return result('Thanks, I’ll pass that update to your property manager for review.',[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),notifyManager:true}}]);
+    if(!staff && ['add_details','request_alternatives'].includes(type)) return result('Thanks, I’ll pass that update to your property manager for review.',[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),facts:mergeFacts({},fields.facts),notifyManager:true}}]);
     return result('This request is awaiting manager review and approval before maintenance can arrange a visit.');
   }
   if(type==='clarify_issue' && !staff) {

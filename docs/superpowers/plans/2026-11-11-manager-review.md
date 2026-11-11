@@ -55,8 +55,8 @@
 
 - [x] Replay the exact spigot request, manager's exact reply and affordability acknowledgement; inspect saved records and actual outbox payloads.
 - [x] Verify normal faucet repair reaches maintenance, urgent gas report reaches the manager immediately, inspection approval does not grant installation authority, and approvals never create appointments by themselves.
-- [ ] Run full bot/app suites and syntax/diff checks; record measured results and limits. Request one independent read-only review of both repository diffs, as required by executing-plans.
-- [ ] Reproduce any important review finding before its fix, verify regression tests and full suites, then commit the finished change and report local completion. Keep production rollout pending.
+- [x] Run full bot/app suites and syntax/diff checks; record measured results and limits. Request one independent read-only review of both repository diffs, as required by executing-plans.
+- [x] Reproduce any important review finding before its fix, verify regression tests and full suites, then commit the finished change and report local completion. Keep production rollout pending.
 
 ## Release ordering
 

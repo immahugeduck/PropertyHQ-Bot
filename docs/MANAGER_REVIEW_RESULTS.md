@@ -95,4 +95,36 @@ retain existing behavior; automatic portal classification and UI changes are
 outside this focused upgrade. Second Brain remains excluded.
 
 Apply the additive manager-review migration before deploying its matching bot
-update. Final independent review and verification are recorded below after review.
+update.
+
+## Independent review
+
+One fresh read-only reviewer found five Important interactions. All were
+reproduced before changes; nine added unit/database regressions failed first.
+The single fix pass then passed all **49 focused review tests**:
+
+1. An entry refusal during review now updates the saved access facts without
+   releasing scheduling. Both raw tenant text and an independent direct SQL fact
+   patch are covered; later inspection approval tells maintenance access is refused.
+2. “Sounds good” after selecting another repair's visit confirms that repair.
+   A sole pending review no longer overrides another request's latest question.
+3. Manager progress updates addressed through names or active context retain
+   normal interpretation. Review-note handling resolves the target after model
+   extraction; staff-only calendar entries and status queries remain available.
+4. Direct portal status writes cannot start or complete pending review requests.
+   Intentional cancellation remains available.
+5. Portal inspection completion returns the request to manager review, retains
+   findings, retires the appointment and sends the findings to the manager. It
+   clears a used grant while retaining a refusal. A repeated completion cannot
+   close the pending installation.
+
+No product findings were deferred. The fixes are verified by regression tests
+and the full suites; there is no second reviewer pass. Review exclusions remain
+the documented live AI/carrier boundaries, unmarked portal classification/new UI,
+and pre-existing unrelated workflows. The explicit SEND-hazard, SMS-length and
+inspection-entry decisions remain as documented above.
+
+Final local verification: **302 bot tests passed, 28 Property HQ tests passed,
+49 focused manager-review tests passed; bot syntax and both repository diff
+checks passed.** Both implementation branches are preserved for the separately
+pending rollout. No live migration, deployment or message was sent.

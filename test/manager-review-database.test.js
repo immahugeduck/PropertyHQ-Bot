@@ -217,3 +217,75 @@ test('an emergency form report bypasses an optional-review marker',async()=>{
   assert.equal(notices.some(n=>/How would you like me to respond/.test(n.body)),false);
  } finally {await f.close();}
 });
+
+test('a tenant entry refusal during manager review is saved before inspection authorization',async()=>{
+ const f=await coordinatorFixture();
+ try {
+  const text='Please add a wheelchair ramp. Maintenance can enter if nobody is home.';
+  await f.run(c.tenantPhone,text,{model:{type:'request_manager_review',fields:{description:text,facts:{issue:'other',entryPermission:true}}}});
+  const job=(await f.context(c.tenantPhone)).jobs[0];assert.equal(job.coordinator_details.entryPermission,true);
+  const refusal=await f.run(c.tenantPhone,'Do not enter');
+  let current=(await f.context(c.tenantPhone)).jobs[0];
+  assert.equal(current.coordinator_details.entryPermission,false);assert.equal(current.coordinator_review_status,'awaiting_manager_response');
+  assert.equal(current.scheduled_at,null);assert.equal((await f.outbox(refusal.sid,c.maintenance)).length,0);
+  // The database must apply the patch independently of bot interpretation too.
+  await f.db.query("update public.maintenance_requests set coordinator_details=coordinator_details||'{\"entryPermission\":true}'::jsonb where id=$1",[job.id]);
+  await rawCommit(f,c.tenantPhone,'Do not enter',{type:'review_followup',jobId:job.id,fields:{facts:{entryPermission:false},notifyManager:true}});
+  current=(await f.context(c.tenantPhone)).jobs[0];assert.equal(current.coordinator_details.entryPermission,false);
+  const approval=await f.run(c.manager,'APPROVE INSPECTION');
+  const order=(await f.outbox(approval.sid,c.maintenance))[0].body;
+  assert.match(order,/not granted; arrange access/);assert.doesNotMatch(order,/Entry is permitted|Permission.*: granted/);
+  assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
+ } finally {await f.close();}
+});
+
+test('an ordinary repair can be confirmed and receive manager progress while a review stays pending',async()=>{
+ const f=await coordinatorFixture();
+ try {
+  await create(f);const review=(await f.context(c.tenantPhone)).jobs[0];
+  const repair=(await f.db.query("insert into public.maintenance_requests(user_id,tenant_id,property_id,title,description,source,coordinator_details) values($1,$2,$3,'Faucet repair','Kitchen faucet leaking','sms','{\"issue\":\"sink_disposal\",\"entryPermission\":false}') returning *",[c.user,c.tenant,c.property])).rows[0];
+  const options=[{start:'2035-01-02T15:00:00Z',end:'2035-01-02T16:00:00Z'}];
+  await f.db.query("insert into public.coordinator_appointments(request_id,user_id,options,proposal_version,stage) values($1,$2,$3,1,'awaiting_selection')",[repair.id,c.user,JSON.stringify(options)]);
+  assert.match((await f.run(c.tenantPhone,'1')).reply,/Does that time work for you/);
+  assert.match((await f.run(c.tenantPhone,'Sounds good')).reply,/scheduled/);
+  assert.ok((await f.context(c.tenantPhone)).jobs.find(j=>j.id===repair.id).scheduled_at);
+  const progress=await f.run(c.manager,'The parts for Bree Fixture’s kitchen faucet are ordered.',{model:{type:'report_progress',jobId:repair.id,fields:{description:'The faucet parts are ordered.'}}});
+  assert.ok((await f.outbox(progress.sid,c.tenantPhone)).some(n=>/faucet parts are ordered/.test(n.body)));
+  const currentReview=(await f.context(c.tenantPhone)).jobs.find(j=>j.id===review.id);
+  assert.equal(currentReview.coordinator_review_status,'awaiting_manager_response');assert.equal(currentReview.scheduled_at,null);
+ } finally {await f.close();}
+});
+
+test('portal status writes cannot start or complete pending review, while cancellation remains available',async()=>{
+ const f=await coordinatorFixture();
+ try {
+  await create(f);const job=(await f.context(c.tenantPhone)).jobs[0];
+  for(const status of ['in_progress','completed']) await assert.rejects(f.db.query('update public.maintenance_requests set status=$2 where id=$1',[job.id,status]),/manager.*review|manager.*approval/);
+  await f.db.query("update public.maintenance_requests set status='cancelled' where id=$1",[job.id]);
+  assert.equal((await f.db.query('select status from public.maintenance_requests where id=$1',[job.id])).rows[0].status,'cancelled');
+ } finally {await f.close();}
+});
+
+for(const grant of [true,false]) test('portal inspection completion returns findings to review and handles entry '+grant,async()=>{
+ const f=await coordinatorFixture();
+ try {
+  await create(f);const job=(await f.context(c.tenantPhone)).jobs[0];
+  await f.db.query('update public.maintenance_requests set coordinator_details=jsonb_build_object(\'entryPermission\',$2::boolean) where id=$1',[job.id,grant]);
+  await f.run(c.manager,'APPROVE INSPECTION');
+  const start='2035-01-02T15:00:00Z',end='2035-01-02T16:00:00Z';
+  await f.db.query("update public.coordinator_appointments set stage='confirmed',start_at=$2,end_at=$3,selected=1 where request_id=$1",[job.id,start,end]);
+  await f.db.query("update public.maintenance_requests set status='in_progress',scheduled_at=$2,scheduled_date='2035-01-02' where id=$1",[job.id,start]);
+  const findings='Inspection found a plumber is needed to install the line.';
+  await f.db.query("update public.maintenance_requests set status='completed',notes=$2 where id=$1",[job.id,findings]);
+  const saved=(await f.context(c.tenantPhone)).jobs[0];
+  assert.equal(saved.status,'open');assert.equal(saved.coordinator_review_status,'awaiting_manager_response');assert.equal(saved.scheduled_at,null);
+  assert.equal(saved.coordinator_details.entryPermission,grant?undefined:false);
+  const appointment=(await f.db.query('select stage,options,selected from public.coordinator_appointments where request_id=$1',[job.id])).rows[0];
+  assert.equal(appointment.stage,'completed');assert.deepEqual(appointment.options,[]);assert.equal(appointment.selected,null);
+  const notices=(await f.db.query("select to_number,body from public.coordinator_outbox where request_id=$1 and event_sid like 'portal-inspection:%'",[job.id])).rows;
+  assert.equal(notices.length,2);assert.ok(notices.some(n=>n.to_number===c.manager && n.body.includes(findings)));
+  assert.ok(notices.some(n=>n.to_number===c.tenantPhone && /completed the inspection.*manager will review/.test(n.body)));
+  assert.equal(notices.some(n=>n.to_number===c.maintenance),false);
+  await assert.rejects(f.db.query("update public.maintenance_requests set status='completed' where id=$1",[job.id]),/manager.*review|manager.*approval/);
+ } finally {await f.close();}
+});

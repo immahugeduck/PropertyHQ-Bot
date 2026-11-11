@@ -1,3 +1,5 @@
+import {workingStaffJob} from './staff-context.js';
+
 const pending=new Set(['awaiting_manager_response','awaiting_tenant_response']);
 const open=job=>!['completed','cancelled'].includes(job.status);
 export const isReviewPending=job=>pending.has(job?.coordinator_review_status);
@@ -25,10 +27,11 @@ export function parseManagerCommand(text='') {
 }
 
 export function tenantReviewJob(context) {
-  const jobs=(context.jobs||[]).filter(j=>open(j) && j.tenant_id===context.identity.tenantId && isReviewPending(j));
+  const jobs=(context.jobs||[]).filter(j=>open(j) && j.tenant_id===context.identity.tenantId);
   const previous=context.messages?.find(m=>typeof m.reply==='string' && m.reply.trim());
   const id=previous?.jobId || context.state?.activeJobId;
-  return jobs.find(j=>j.id===id) || (jobs.length===1?jobs[0]:undefined);
+  const current=id?jobs.find(j=>j.id===id):jobs.length===1?jobs[0]:undefined;
+  return isReviewPending(current)?current:undefined;
 }
 
 function reviewAcknowledgement(text) {
@@ -54,11 +57,12 @@ export function interpretReviewMessage({context,text}) {
   }
 }
 
-export function managerInternalNote({context,text}) {
+export function managerInternalNote({context,text,intent}) {
   if(context.identity.role!=='manager' || !(context.jobs||[]).some(isReviewPending)) return;
+  if(['request_status','staff_event'].includes(intent?.type)) return;
   if(/^(?:what|what's|when|where|show|list|check)\b|\bstatus\b/i.test(text)) return;
-  const number=text.match(/(?:^|\s)#(\d{4,})\b/)?.[1];
-  const job=commandJob(context,number);
+  const job=workingStaffJob(context,text,intent?.jobId);
+  if(job && !isReviewPending(job)) return;
   return {type:'manager_review_note',jobId:job?.id,fields:{description:text}};
 }
 
