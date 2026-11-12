@@ -90,14 +90,23 @@ These change the saved workflow and future message generation. They do not repla
 previous outbox messages, book an old scheduling instruction, or retrospectively
 grant access on an existing tenant request.
 
-Both tested repositories have been pushed to
-`feat/tenant-maintenance-upgrades`. Production remains on its current version:
-automatic approval review rejected applying the first production migration,
-stating that permission to push code did not clearly authorize the live database
-function/schema changes and their effects on routing and scheduling. A read-only
-check confirmed that none of the three migrations was applied.
+The initial branch push was followed by explicit user approval on November 12 to
+apply all changes, push both repositories to `main` and build fresh deployments.
+All three migrations were then applied successfully to the existing Property HQ
+production database through the Supabase migration tool:
 
-The remaining release action requires explicit approval to apply all three
-migrations to the existing Property HQ production database, then release the
-matching bot and Property HQ branches to production `main`. This order keeps
-the deployed bot and database workflow compatible.
+| Reviewed source migration | Production migration record |
+| --- | --- |
+| `20261108181500_tenant_maintenance_handoff.sql` | `20261112230350_tenant_maintenance_handoff` |
+| `20261111003933_manager_review_replies.sql` | `20261112230408_manager_review_replies` |
+| `20261111214912_context_followup.sql` | `20261112230413_context_followup` |
+
+The production versions reflect application time; these names map to the reviewed
+source files above. Do not replay them based only on differing filename dates.
+Read-only production checks confirmed request/calendar context, the approval
+guard, merged access instructions and private function permissions. The security
+advisor results matched the pre-release baseline.
+
+Publication uses the tested source on each repository's production `main` branch
+to trigger new builds. Vercel's production deployment records identify the final
+commit, build status and domains. The earlier migration approval block is resolved.
