@@ -18,7 +18,15 @@ export function decideConversation({ context: original, intent, safety, now = ne
   const type = intent?.type || 'clarify', fields = intent?.fields || {};
   if(['send_manager_reply','authorize_manager_request','manager_review_note'].includes(type)) return decideManagerCommand({context,intent,nextState});
   if (staffTypes.has(type) && !staff) return result('I can help with your maintenance request. Only our staff can make that change.');
-  if(staff && type==='clarify' && fields.scheduleClarification) return result(fields.scheduleClarification==='daypart'?'Please confirm whether you mean morning or evening, and the exact visit time.':'Please give me a future day and exact time for that visit.');
+  if(staff && type==='clarify' && fields.scheduleClarification) {
+    const job=context.jobs.find(job=>job.id===intent.jobId);
+    const decision=result(fields.scheduleClock?`Please confirm whether you mean ${fields.scheduleClock} or a different time in the ${fields.scheduleDaypart}?`:fields.scheduleClarification==='daypart'?'Please confirm whether you mean morning or evening, and the exact visit time.':'Please give me a future day and exact time for that visit.');
+    if(job) {
+      nextState.activeJobId=job.id;
+      decision.replyJobId=job.id;
+    }
+    return decision;
+  }
   if (!staff && context.identity.state !== 'known') {
     if (clean(fields.name)) nextState.name = clean(fields.name);
     if (clean(fields.address)) nextState.address = clean(fields.address);

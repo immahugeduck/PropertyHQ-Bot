@@ -1,6 +1,8 @@
 # Agent HQ
 
-Production-shaped Phase 1 backend for receiving inbound phone/SMS traffic and triaging maintenance requests for First Call Maintenance. **Twilio is the active phone integration.**
+Maintenance coordination agent for Property HQ and First Call Maintenance. **Twilio is the active phone integration.** The coordinator-enabled SMS path uses AI interpretation, controlled actions and persistent Supabase memory.
+
+The agent entry point is `src/agent/runtime.js`. Its versioned instructions and strict model action contract live beside it in `src/agent/`. See [the current architecture](docs/ARCHITECTURE.md) and [conversation guide](docs/AGENT_HQ.md) for the active workflow. The provider and legacy fallback details below describe the original channel integrations.
 
 Phase 1 establishes:
 - Twilio SMS/MMS and Voice webhook endpoints (with an alternate AgentPhone endpoint)

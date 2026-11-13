@@ -7,9 +7,10 @@ import { mkdtempSync,writeFileSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 function runCli(preload) {
  const dir=mkdtempSync(join(tmpdir(),'scheduler-fixture-'));
- try {const file=join(dir,'mock.mjs');writeFileSync(file,preload);return spawnSync(process.execPath,['--import',file,new URL('../scripts/provision-delivery-job.mjs',import.meta.url).pathname],{encoding:'utf8',env:{CRON_JOB_API_KEY:'fixture\nkey',COORDINATOR_DELIVERY_SECRET:'fixture-delivery-secret-32-characters'}});}
+ try {const file=join(dir,'mock.mjs');writeFileSync(file,preload);return spawnSync(process.execPath,['--import',pathToFileURL(file).href,fileURLToPath(new URL('../scripts/provision-delivery-job.mjs',import.meta.url))],{encoding:'utf8',env:{CRON_JOB_API_KEY:'fixture\nkey',COORDINATOR_DELIVERY_SECRET:'fixture-delivery-secret-32-characters'}});}
  finally {rmSync(dir,{recursive:true,force:true});}
 }
 test('scheduler CLI handles a wrapped key and still provisions only a disabled job',()=>{const r=runCli(`globalThis.fetch=async(url,opts)=>{new Headers(opts.headers);if(opts.headers.Authorization!=='Bearer fixturekey') throw Error('wrong header');if(opts.method==='GET') return {ok:true,json:async()=>({jobs:[]})};const body=JSON.parse(opts.body);if(body.job.enabled!==false)throw Error('must stay disabled');return {ok:true,json:async()=>({jobId:123})};};`);assert.equal(r.status,0,r.stderr);assert.deepEqual(JSON.parse(r.stdout),{jobId:123,enabled:false});});
