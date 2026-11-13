@@ -77,17 +77,16 @@ test('repeated unchanged permission preserves the staff proposal without another
   } finally {await f.close();}
 });
 
-test('a form-created repair uses the same simple maintenance handoff and manager context',async()=>{
+test('a form-created repair waits for entry permission and preserves manager context',async()=>{
   const f=await coordinatorFixture();
   try {
     const row=(await f.db.query("insert into public.maintenance_requests(user_id,tenant_id,property_id,title,description,source) values($1,$2,$3,'Window screen','Bedroom window screen is torn','app') returning id,job_number",[c.user,c.tenant,c.property])).rows[0];
     const notices=await f.outbox('app-maintenance:'+row.id);
     assert.ok(notices.some(n=>n.to_number===c.manager));
     const staff=notices.find(n=>n.to_number===c.maintenance);
-    assert.ok(staff);
-    assert.equal((staff.body.match(new RegExp('#'+row.job_number+'\\b','g'))||[]).length,1);
-    assert.match(staff.body,/Bedroom window screen is torn/);
-    assert.match(staff.body,/permission to enter.*TBD/i);
+    assert.equal(staff,undefined);
+    assert.match(notices.find(n=>n.to_number===c.manager).body,/Bedroom window screen is torn/);
+    assert.ok(notices.some(n=>n.to_number===c.tenantPhone && /before.*send.*maintenance/i.test(n.body)));
     assert.ok(notices.some(n=>n.to_number===c.tenantPhone && /received.*request/i.test(n.body)));
   } finally {await f.close();}
 });
@@ -172,8 +171,9 @@ test('sink scheduling saves changed availability, clears the old choice, and req
     const refused=await f.run(c.tenantPhone,'No');
     const plan=(await f.context(c.maintenance)).jobs[0];
     assert.equal(plan.options.length,3);
-    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[refused.sid,c.maintenance]);
-    const approved=await f.run(c.maintenance,'Yes');
+    assert.equal((await f.outbox(refused.sid,c.maintenance)).length,0);
+    await f.run(c.manager,'Arrange an attended visit',{model:{type:'offer_times',jobId:plan.id,fields:{options:plan.options}}});
+    const approved=await f.run(c.manager,'Yes');
     const choices=(await f.context(c.tenantPhone)).jobs[0];
     assert.equal(choices.stage,'awaiting_selection');
     assert.match((await f.outbox(approved.sid,c.tenantPhone))[0].body,/Which time works/);
@@ -187,9 +187,8 @@ test('sink scheduling saves changed availability, clears the old choice, and req
     assert.deepEqual(job.options,[]);
     assert.equal(job.stage,'rescheduling');
     assert.equal(job.scheduled_at,null);
-    const update=(await f.outbox(alternatives.sid,c.maintenance))[0];
-    assert.match(update.body,/Tenant availability: Weekdays after 4 PM/);
-    assert.match(update.body,/New visit times needed/);
+    assert.equal((await f.outbox(alternatives.sid,c.maintenance)).length,0);
+    assert.ok((await f.outbox(alternatives.sid,c.manager)).some(n=>/Weekdays after 4 PM/.test(n.body)));
     assert.equal((await f.outbox(alternatives.sid,c.tenantPhone)).length,0);
     await assert.rejects(f.db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb)',[c.user,c.tenantPhone,'SMstale',reloaded.version,'Old option',JSON.stringify({reply:'Old option',nextState:{},actions:[{type:'select_time',jobId:job.id,fields:{choice:1,proposalVersion:choices.proposal_version}}]})]),/stale/);
     // Staff deliberately provides revised exact visits; no time is invented by
@@ -198,14 +197,15 @@ test('sink scheduling saves changed availability, clears the old choice, and req
       const start=Date.parse(plan.options[0].start)+day*86400000+8*3600000;
       return {start:new Date(start).toISOString(),end:new Date(start+3600000).toISOString()};
     });
-    const review=await f.run(c.maintenance,'Revised sink visit times',{model:{type:'offer_times',jobId:job.id,fields:{options:revised}}});
+    const review=await f.run(c.manager,'Revised sink visit times',{model:{type:'offer_times',jobId:job.id,fields:{options:revised}}});
     assert.match(review.reply,/Shall I send/);
-    await f.run(c.maintenance,'Yes');
+    await f.run(c.manager,'Yes');
     await f.run(c.tenantPhone,'2');
     assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
     const confirmed=await f.run(c.tenantPhone,'Yes, that works.');
     assert.match(confirmed.reply,/scheduled/);
     assert.equal(Date.parse((await f.context(c.tenantPhone)).jobs[0].scheduled_at),Date.parse(revised[1].start));
+    const attended=(await f.outbox(confirmed.sid,c.maintenance))[0];assert.ok(attended);assert.match(attended.body,/NO; arrange access/i);assert.match(attended.body,/Visit:/);
   } finally {await f.close();}
 });
 
@@ -288,14 +288,15 @@ test('a scheduled repair update still reaches maintenance when it needs no new s
 test('new repair details survive alongside structured facts in the maintenance message',async()=>{
   const f=await coordinatorFixture();
   try {
-    await f.run(c.tenantPhone,'Screen door needs repair',{model:{type:'new_request',fields:{description:'Screen door needs repair',facts:{issue:'screen_door'}}}});
+    await f.run(c.tenantPhone,'Screen door needs repair. Maintenance may enter if nobody is home.',{model:{type:'new_request',fields:{description:'Screen door needs repair',facts:{issue:'screen_door'}}}});
     const job=(await f.context(c.tenantPhone)).jobs[0];
     const door='The main entry door also will not lock.';
     const update=await f.run(c.tenantPhone,door,{model:{type:'add_details',jobId:job.id,fields:{description:door,facts:{mainDoorSecure:false}}}});
-    assert.match((await f.outbox(update.sid,c.maintenance))[0].body,/main entry door.*not lock/i);
+    const pending=async()=>(await f.db.query("select * from public.coordinator_outbox where request_id=$1 and to_number=$2 and status='queued'",[job.id,c.maintenance])).rows;
+    assert.equal((await pending()).length,1);assert.match((await pending())[0].body,/main entry door.*not lock/i);
     const location='The damaged screen door is beside the basement stairs.';
     const followup=await f.run(c.tenantPhone,location,{model:{type:'add_details',jobId:job.id,fields:{description:location,facts:{issue:'screen_door'}}}});
-    assert.match((await f.outbox(followup.sid,c.maintenance))[0].body,/basement stairs/);
+    assert.equal((await pending()).length,1);assert.match((await pending())[0].body,/main entry door.*not lock/i);assert.match((await pending())[0].body,/basement stairs/);
   } finally {await f.close();}
 });
 
@@ -304,8 +305,10 @@ test('mixed alternatives and entry refusal save availability and cannot confirm 
   try {
     await f.run(c.tenantPhone,'Washer not working',{model:{type:'new_request',fields:{description:'Washer not working',facts:{issue:'washer'}}}});
     const refusal=await f.run(c.tenantPhone,'No');
-    await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[refusal.sid,c.maintenance]);
-    await f.run(c.maintenance,'Yes');
+    assert.equal((await f.outbox(refusal.sid,c.maintenance)).length,0);
+    const plan=(await f.context(c.manager)).jobs[0];
+    await f.run(c.manager,'Arrange an attended visit',{model:{type:'offer_times',jobId:plan.id,fields:{options:plan.options}}});
+    await f.run(c.manager,'Yes');
     await f.run(c.tenantPhone,'1');
     const job=(await f.context(c.tenantPhone)).jobs[0];
     const text="Those times don't work. You do not have my permission to enter. Weekdays after 4 PM instead.";
@@ -315,7 +318,8 @@ test('mixed alternatives and entry refusal save availability and cannot confirm 
     assert.equal(after.jobs[0].coordinator_details.availability,'Weekdays after 4 PM');
     assert.equal(after.jobs[0].coordinator_details.entryPermission,false);
     assert.equal(after.jobs[0].stage,'rescheduling');
-    assert.match((await f.outbox(update.sid,c.maintenance))[0].body,/Weekdays after 4 PM/);
+    assert.equal((await f.outbox(update.sid,c.maintenance)).length,0);
+    assert.ok((await f.outbox(update.sid,c.manager)).some(n=>/Weekdays after 4 PM/.test(n.body)));
     await f.run(c.tenantPhone,'CONFIRM');
     assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
   } finally {await f.close();}

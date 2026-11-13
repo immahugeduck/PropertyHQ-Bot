@@ -28,6 +28,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261108181500_tenant_maintenance_handoff.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111003933_manager_review_replies.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111214912_context_followup.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261112235510_maintenance_dispatch_gate.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -122,10 +123,10 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const formRows=(await db.query("select to_number,body from public.coordinator_outbox where event_sid=$1",['app-maintenance:'+form.id])).rows;
  await db.query("update public.coordinator_outbox set status='sent' where event_sid=$1",['app-maintenance:'+form.id]);
  const formHistory=(await ctx(secondPhone)).messages;assert.ok(formHistory.some(m=>m.jobId===form.id && /permission to enter/i.test(m.reply||'')));assert.equal(formHistory[0].jobId,form.id);assert.match(formHistory[0].reply,/permission to enter/i);
- assert.equal(formRows.length,3);assert.ok(formRows.some(r=>r.to_number===maintenance && /permission.*TBD/i.test(r.body)));assert.ok(formRows.some(r=>r.to_number===manager));
+ assert.equal(formRows.length,2);assert.equal(formRows.some(r=>r.to_number===maintenance),false);assert.ok(formRows.some(r=>r.to_number===manager));
  assert.ok(formRows.some(r=>r.to_number===secondPhone && /received your/i.test(r.body)));
  assert.doesNotMatch(formRows.find(r=>r.to_number===secondPhone).body,/#\d+|request #/);
- assert.match(formRows.find(r=>r.to_number===maintenance).body,/#\d+/);
+ assert.match(formRows.find(r=>r.to_number===manager).body,/#\d+/);
  await commit(maintenance,(await ctx(maintenance)).version,[{type:'report_progress',jobId:form.id,fields:{description:'#'+(await ctx(maintenance)).jobs.find(j=>j.id===form.id).job_number+': Waiting for a replacement screen.'}}],{},'SMprogressLanguage');
  const progress=(await db.query("select body from public.coordinator_outbox where tenant_id=$1 and event_sid=$2",[tenant,'SMprogressLanguage'])).rows[0].body;
  assert.match(progress,/replacement screen/);assert.doesNotMatch(progress,/#\d+/);
@@ -133,7 +134,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const started=(await db.query('select body from public.coordinator_outbox where tenant_id=$1 and event_sid=$2',[tenant,'SMstartLanguage'])).rows[0].body;
  assert.match(started,/getting started.*window screen/);assert.doesNotMatch(started,/#\d+/);
  await db.query("update public.maintenance_requests set description='Clarified issue' where id=$1",[form.id]);
- assert.equal((await db.query('select count(*)::int n from public.coordinator_outbox where event_sid=$1',['app-maintenance:'+form.id])).rows[0].n,3);
+ assert.equal((await db.query('select count(*)::int n from public.coordinator_outbox where event_sid=$1',['app-maintenance:'+form.id])).rows[0].n,2);
  const beforePrivate=(await db.query('select count(*)::int n from public.coordinator_outbox')).rows[0].n;
  await commit(manager,4,[{type:'staff_event',fields:{eventTitle:'Supply pickup',appointmentStart:'2035-01-10T15:00:00Z',appointmentEnd:'2035-01-10T16:00:00Z'}}]);
  await db.query("insert into public.coordinator_staff_events(user_id,staff_phone,title,start_at,end_at) select $1,$2,'Historical event',timestamp with time zone '2020-01-01 10:00Z'+i*interval '1 day',timestamp with time zone '2020-01-01 11:00Z'+i*interval '1 day' from generate_series(1,101)i",[user,manager]);
@@ -143,10 +144,10 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await assert.rejects(commit(manager,5,[{type:'staff_event',fields:{eventTitle:'Conflicting pickup',appointmentStart:'2035-01-10T15:30:00Z',appointmentEnd:'2035-01-10T16:30:00Z'}}]),/conflict/);
  const requestVersion=(await ctx(secondPhone)).version;
  for(let i=0;i<2;i++) await commit(secondPhone,requestVersion+i,[{type:'request_scheduling',jobId:form.id,fields:{description:'Can we get this week?'}}]);
- assert.equal((await db.query("select count(*)::int n from public.coordinator_outbox where request_id=$1 and action_key='scheduling_followup'",[form.id])).rows[0].n,1);
+ assert.equal((await db.query('select count(*)::int n from public.coordinator_outbox where request_id=$1 and to_number=$2',[form.id,maintenance])).rows[0].n,0,'status requests cannot dispatch while entry permission is missing');
  assert.ok((await ctx(secondPhone)).jobs.every(j=>j.notes==null));
  // Staff alert -> unnumbered offer -> duplicate clarification -> natural staff confirmation.
- const staffForm=(await db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,source) values($1,$2,$3,'Another report of window screen','Same window issue','app') returning id",[user,property,tenant])).rows[0];
+ const staffForm=(await db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,source,coordinator_details) values($1,$2,$3,'Another report of window screen','Same window issue','app','{\"entryPermission\":true}'::jsonb) returning id",[user,property,tenant])).rows[0];
  await db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",['app-maintenance:'+staffForm.id,maintenance]);
  await db.query("update public.maintenance_requests set coordinator_details=coordinator_details||'{\"entryPermission\":false}'::jsonb where id=any($1::uuid[])",[[form.id,staffForm.id]]);
  const staffVisit=[15,16,17].map(day=>({start:`2035-01-${day}T14:30:00Z`,end:`2035-01-${day}T15:30:00Z`}));

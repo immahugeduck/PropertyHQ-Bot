@@ -80,9 +80,12 @@ export function decideManagerCommand({context,intent,nextState}) {
     return result('Your exact message is saved and queued for the tenant.',[{type:'send_manager_reply',jobId:job.id,fields:{body:command.body}}]);
   }
   if(!job.coordinator_review_status || command.scope!==intent.fields?.scope) return result('This command needs a manager-review request and an explicit inspection or work approval.');
+  const next=job.coordinator_details?.entryPermission===true
+    ? 'I’ll send the request to maintenance to coordinate a visit.'
+    : 'I’ll wait for the tenant’s entry permission before sending the request to maintenance.';
   const reply=command.scope==='inspection'
-    ? 'Inspection only is approved. I’ll ask maintenance to coordinate a visit; installation still requires separate work approval.'
-    : 'Work is approved. I’ll ask maintenance to coordinate the visit.';
+    ? `Inspection only is approved. ${next} Installation still requires separate work approval.`
+    : `Work is approved. ${next}`;
   return result(reply,[{type:'authorize_manager_request',jobId:job.id,fields:{scope:command.scope}}]);
 }
 

@@ -23,7 +23,7 @@ for(const text of ['My kitchen faucet is broken.','The existing garden spigot is
  const c=context('tenant',[]);
  const d=await run(c,text,{type:'new_request',fields:{description:text,facts:{issue:'other'}}});
  assert.equal(d.actions[0]?.type,'new_request');
- assert.match(d.reply,/schedule.*visit/i);
+ assert.match(d.reply,/before.*send.*maintenance/i);
 });
 
 test('manager SEND preserves the full accepted wording without interpreting conditional approval',async()=>{

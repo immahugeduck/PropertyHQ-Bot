@@ -26,10 +26,10 @@ export function inspectionReply({facts,scheduled=false,isNew=false,name,followUp
   const precaution = facts.issue === 'washer' ? ' Please leave the washer off until maintenance checks it.' : facts.issue === 'sink_disposal' ? ' Please avoid using the kitchen sink and disposal until maintenance checks it.' : '';
   if (scheduled) return `${greeting} We’ll keep the scheduled visit.${precaution}`;
   const update = facts.updateWhenHome ? ' Just update us when someone gets home. We’ll arrange an inspection either way.' : '';
-  const scheduling = ' Maintenance will reach out to schedule a visit.';
-  // The inspection and staff referral never wait for this safety question.
+  const scheduling = facts.entryPermission===undefined?' I’ve saved your request.':facts.entryPermission===false?' Your property manager will help arrange access.':' Maintenance will reach out to schedule a visit.';
+  // Collect the separate door-safety fact while the repair remains saved.
   if (facts.issue === 'screen_door' && facts.mainDoorSecure === undefined && !isNew) return `${greeting}${scheduling} Is the main entry door still closing and locking securely?`;
-  const entry = facts.entryPermission === undefined ? ' Does maintenance have permission to enter if nobody’s home?' : '';
+  const entry = facts.entryPermission === undefined ? ' Before I send it to maintenance, does maintenance have permission to enter if nobody’s home?' : '';
   // Do not turn an appliance/drain report into a tenant diagnostic interview.
   const question = !['washer','screen_door','window_screen','sink_disposal'].includes(facts.issue) && !entry && followUp ? ` ${followUp}` : '';
   return `${greeting}${update}${scheduling}${entry}${precaution}${question}`;

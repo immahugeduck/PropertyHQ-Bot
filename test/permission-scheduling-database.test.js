@@ -27,6 +27,7 @@ test('permission-led SQL: private suggestions, conflicts and staff-only booking'
  await db.exec(await sqlFile('supabase/migrations/20261108181500_tenant_maintenance_handoff.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111003933_manager_review_replies.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111214912_context_followup.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261112235510_maintenance_dispatch_gate.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -62,8 +63,8 @@ test('permission-led SQL: private suggestions, conflicts and staff-only booking'
  // A portal booking created after staff approval also blocks the tenant's later selection.
  await commit(from,4,[{type:'add_details',jobId:second.id,fields:{description:'I must be present',facts:{entryPermission:false}}}],{},'SMrevokeAgain');
  const plan=(await ctx(maintenance)).jobs.find(j=>j.id===second.id);
- await db.query("update public.coordinator_outbox set status='sent' where event_sid='SMrevokeAgain' and to_number=$1",[maintenance]);
- const choices=await run(maintenance,'Yes','SMthreeOptions');assert.match(choices,/three options/);
+ // A manager deliberately arranges an attended visit after the refusal.
+ await commit(manager,(await ctx(manager)).version,[{type:'offer_times',jobId:second.id,fields:{options:plan.options}}],{},'SMthreeOptions');
  const offered=(await ctx(from)).jobs.find(j=>j.id===second.id);
  await db.query("insert into public.maintenance_requests(user_id,property_id,title,description,scheduled_at,source) values($1,$2,'Competing portal job','Busy slot',$3,'sms')",[user,property,plan.options[0].start]);
  await assert.rejects(commit(from,5,[{type:'select_time',jobId:second.id,fields:{choice:1,proposalVersion:offered.proposal_version}}]),/unavailable/);

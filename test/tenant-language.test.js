@@ -4,7 +4,7 @@ import {decideConversation} from '../src/coordinator.js';
 import {summarizeJobs} from '../src/appointments.js';
 import {interpretMessage} from '../src/assistant.js';
 const now=new Date('2030-01-01T12:00:00Z');
-const job={id:'j',job_number:1005,tenant_id:'t',title:'Kitchen window screen',status:'open',scheduled_at:null,notes:'Internal staff note',coordinator_details:{issue:'window_screen'}};
+const job={id:'j',job_number:1005,tenant_id:'t',title:'Kitchen window screen',status:'open',scheduled_at:null,notes:'Internal staff note',coordinator_details:{issue:'window_screen',entryPermission:true}};
 const base=()=>({identity:{role:'tenant',state:'known',tenantId:'t',propertyId:'p',name:'Claude'},settings:{timezone:'America/Indiana/Indianapolis'},jobs:[job],state:{},messages:[],staffEvents:[],inbound:'Can we arrange a visit this week?'});
 const decide=(c,intent)=>decideConversation({context:c,intent,now});
 const noCodes=reply=>{assert.doesNotMatch(reply,/#\d+|\b1005\b|Internal staff|job number|Issue:|Progress:/i);};

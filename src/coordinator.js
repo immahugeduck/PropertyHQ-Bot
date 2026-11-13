@@ -47,6 +47,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(`${ack} What visit times are available?`,actions);
   }
   if(type==='conversation_note') return result('I’ve kept that note with this conversation.');
+  if(type==='staff_acknowledgement' && staff) return result('');
   if(type==='mock_schedule') return result('Example only — not saved: Monday 9 AM, property check; Tuesday 1 PM, maintenance follow-ups. To add a real staff-only entry, send the task, day and time.');
   if(type==='staff_event') {
     const pending=nextState.pendingStaffEvent || {};
@@ -67,7 +68,10 @@ export function decideConversation({ context: original, intent, safety, now = ne
     if(!staff && open.length===1 && !open[0].scheduled_at) {
       const job=open[0];nextState.activeJobId=job.id;
       if(job.stage==='awaiting_selection' && job.options?.some(o=>Date.parse(o.flexible?o.end:o.start)>+now)) return result(`Maintenance has offered these times for the ${repairLabel(job)}: ${optionText(job.options,context.settings.timezone)}. Which option works for you?`);
-      return result(`Thanks for checking in${context.identity.name?`, ${context.identity.name}`:''}. We haven’t confirmed a visit for the ${repairLabel(job)} yet. I’ll ask maintenance for available visit times.`,[{type:'request_scheduling',jobId:job.id,fields:{description:clean(context.inbound)||'Tenant requested available visit times.'}}]);
+      if(job.status==='in_progress') return result(summarizeJobs({context,filter:fields.filter,jobId:job.id,now}));
+      if(job.coordinator_details?.entryPermission===undefined) return result(`Thanks for checking in${context.identity.name?`, ${context.identity.name}`:''}. Your request for the ${repairLabel(job)} is saved. Before I send it to maintenance, does maintenance have permission to enter if nobody is home?`);
+      if(job.coordinator_details?.entryPermission===false) return result('Your request is saved. Your property manager will help arrange access before maintenance is notified.');
+      return result(`Thanks for checking in${context.identity.name?`, ${context.identity.name}`:''}. Your request for the ${repairLabel(job)} is with maintenance. We’re waiting for a confirmed visit time, and I’ll keep you updated here.`,[{type:'request_scheduling',jobId:job.id,fields:{description:clean(context.inbound)||'Tenant requested available visit times.'}}]);
     }
     return result(summarizeJobs({context,filter:fields.filter,jobId:intent.jobId,now}));
   }
@@ -143,6 +147,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
   if (type==='add_details') {
     if(nextState.pendingIssue?.jobId===job.id) delete nextState.pendingIssue;
     if(staff) {
+      if(context.identity.role==='manager') return result(`I’ve saved that as an internal manager note for #${job.job_number}.`,[{type:'manager_review_note',jobId:job.id,fields:{description:clean(context.inbound)}}]);
       const facts=mergeFacts({},fields.facts);delete facts.entryPermission;delete facts.availability;
       return result(`Noted for ${job.tenant_name || 'the tenant'}’s ${repairLabel(job)} (#${job.job_number}).`,action({description:clean(fields.description)||clean(context.inbound),facts,requestScheduling:false}));
     }
@@ -154,7 +159,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
         : 'Thanks, I’ve recorded that maintenance must arrange entry permission with you.';
       const scheduling=job.scheduled_at
         ? (incoming.entryPermission?' Your visit remains scheduled.':' I’ll let maintenance know to arrange access for your scheduled visit.')
-        : ' I’ll coordinate the visit with maintenance.';
+        : incoming.entryPermission?' I’ll coordinate the visit with maintenance.':' Your property manager will help arrange access before maintenance is notified.';
       return result(acknowledgement+scheduling,action({description:clean(fields.description)||clean(context.inbound),facts:incoming,requestScheduling:!job.scheduled_at}));
     }
     return result(Object.keys(facts).length ? inspectionReply({facts,scheduled:!!job.scheduled_at,followUp}) : `Thanks for the update. I’ll pass that along to maintenance. ${followUp}`,action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts),requestScheduling:!job.scheduled_at}));

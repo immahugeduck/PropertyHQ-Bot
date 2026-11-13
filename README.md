@@ -240,8 +240,9 @@ A washer leak only while running does not trigger the same question again. A
 screen-door report can ask whether the main door still closes and locks, while
 already referring the repair. A suspected disposal/drain leak goes toward inspection
 and scheduling even if nobody is home to check it. The tenant may update the team
-later; diagnosis is never a condition of arranging a visit. Late tenant details go
-to both staff numbers with current visit and entry permission included.
+later; diagnosis is never a condition of arranging a visit. The manager receives
+the conversation context. Maintenance receives one operational work order after
+entry permission, followed by concise material changes when needed.
 
 Staff can offer one specific visit or up to three options. Broad options retain
 their label (such as “Wednesday anytime”) and require a specific tenant-selected
@@ -334,8 +335,10 @@ are records, not automatic timed reminders.
 
 ## Permission-led scheduling
 
-Calendar suggestions are private to maintenance until staff approve them. New requests acknowledge the issue, say maintenance will reach out to schedule, and ask permission to enter while nobody is home. With permission, staff approve one visit and the tenant receives a booking notice. Without permission, staff approve three options before the tenant chooses and confirms. Unknown permission cannot authorize unattended booking.
+Calendar suggestions are private to staff until approved. New ordinary requests are saved and ask permission to enter while nobody is home before maintenance receives a work order. With permission, maintenance receives the compact request and three earliest recorded openings, then can select a visit. Unknown or refused permission stays with the manager for access coordination. A manager can explicitly arrange an attended visit; the tenant must agree to the exact time before maintenance is notified. Unknown or refused unattended permission never authorizes unattended booking. Emergency escalation remains immediate.
+
+Unsent tenant details update the same queued request. Once delivered, only material changes produce concise maintenance updates; unchanged consent, status checks and manager comments do not repeat the work order. Manager comments keep their original author and wording in internal notes, and maintenance context excludes those raw notes. Access instructions from a previous repair cannot supply consent or pet instructions for a newly reported repair.
 
 Suggestions use configured working days/hours, recorded visits, maintenance calendar blocks and portal bookings; staff can replace them. Proposed internal reservations are one hour, not a promised repair duration. A date-only portal booking occupies that day until a precise time is recorded. The bot searches the next fourteen days with at least one-hour lead time. Approval is bound to the exact displayed proposal and conflicts are rechecked atomically, including portal writes. Private suggestions cannot become tenant options merely by asking for alternatives.
 
-Apply additive migration `20261107030000_permission_led_scheduling.sql` before this version. Previously applied pilot migrations must not be blindly reapplied. This migration does not backfill alerts or book existing requests.
+Apply additive migration `20261112235510_maintenance_dispatch_gate.sql` after the previously released handoff, manager-review and context migrations before this bot version. Previously applied pilot migrations must not be blindly reapplied. The new migration does not replay messages, grant permission or book existing requests. See [dispatch verification](docs/MAINTENANCE_DISPATCH_RESULTS.md) for examples and release evidence.

@@ -166,10 +166,11 @@ test('inspection authorization starts access coordination, while completion retu
   assert.match(approved.reply,/Inspection only/);
   let job=(await f.context(c.tenantPhone)).jobs[0];
   assert.equal(job.coordinator_review_status,'inspection_authorized');assert.equal(job.scheduled_at,null);
-  assert.match((await f.outbox(approved.sid,c.maintenance))[0].body,/inspection only|inspection.*separate work approval/i);
+  assert.equal((await f.outbox(approved.sid,c.maintenance)).length,0);assert.match(approved.reply,/wait.*entry permission/i);
   const prompt=(await f.outbox(approved.sid,c.tenantPhone))[0];assert.match(prompt.body,/permission.*enter.*\?/i);
   await f.db.query("update public.coordinator_outbox set status='sent' where id=$1",[prompt.id]);
   const grant=await f.run(c.tenantPhone,'Yes permission granted.');
+  assert.match((await f.outbox(grant.sid,c.maintenance))[0].body,/inspection only|inspection.*separate work approval/i);
   await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
   await f.run(c.maintenance,'1');
   job=(await f.context(c.tenantPhone)).jobs[0];assert.ok(job.scheduled_at);
@@ -233,8 +234,8 @@ test('a tenant entry refusal during manager review is saved before inspection au
   await rawCommit(f,c.tenantPhone,'Do not enter',{type:'review_followup',jobId:job.id,fields:{facts:{entryPermission:false},notifyManager:true}});
   current=(await f.context(c.tenantPhone)).jobs[0];assert.equal(current.coordinator_details.entryPermission,false);
   const approval=await f.run(c.manager,'APPROVE INSPECTION');
-  const order=(await f.outbox(approval.sid,c.maintenance))[0].body;
-  assert.match(order,/NO; arrange access/);assert.doesNotMatch(order,/Entry is permitted|permission.*: YES/i);
+  assert.equal((await f.outbox(approval.sid,c.maintenance)).length,0);
+  assert.match(approval.reply,/wait.*entry permission/i);
   assert.equal((await f.context(c.tenantPhone)).jobs[0].scheduled_at,null);
  } finally {await f.close();}
 });
