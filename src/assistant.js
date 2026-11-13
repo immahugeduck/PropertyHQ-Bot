@@ -2,6 +2,7 @@ import { referencedStaffJobs, selectedStaffJob, workingStaffJob, shownStaffPropo
 import {parseScheduleTime} from './staff.js';
 import {interpretReviewMessage,managerInternalNote} from './manager-review.js';
 import { entryConsent, entryAccessNotes, isEntryPermissionQuestion, isPassiveEntryGrant, isStandaloneEntryReply } from './entry-consent.js';
+import {interpretStaffStatus} from './staff-status.js';
 const TYPES=['collect_contact','request_status','new_request','request_manager_review','add_details','offer_times','choose_time','request_alternatives','start_work','report_progress','complete_work','staff_event','clarify'];
 const nullableString={type:['string','null']};
 const factsSchema = {
@@ -42,6 +43,8 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
   if(staff && /(?:can|could|may) i add (?:something|an? (?:entry|event)) to my (?:schedule|calendar)/i.test(text)) return {type:'staff_event',fields:{}};
   if(/(?:what|show|check).*(?:schedule|appointments|visits).*(?:next|coming) week/i.test(text)) return {type:'request_status',fields:{filter:'next_week'}};
   const previous=context.messages?.find(m=>typeof m.reply==='string' && m.reply.trim());
+  const status=interpretStaffStatus({context,text});
+  if(status) return status;
   if(staff) {
     const job=workingStaffJob(context,text),shown=shownStaffProposal(context,job);
     const selection=text.trim().match(/^(?:(?:book|schedule|choose|option)\s+(?:option\s+)?)?([123])[.! ]*$/i);

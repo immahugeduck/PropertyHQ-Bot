@@ -28,6 +28,7 @@ export function workingStaffJob(context, text = '', explicitId, intentType) {
   if(refs.length) return refs.length===1?refs[0]:null;
   if(/(?:#|job|request)\s*\d{4,}/i.test(text) || /^\s*\d{4,}\s*$/.test(text) || /\b\d{4,}\s*(?:and|&|,)\s*\d{4,}\b/i.test(text)) return null;
   const explicit=context.jobs.find(j=>j.id===explicitId || String(j.job_number)===String(explicitId));
+  if(explicitId && !explicit) return null;
   const named=namedStaffJobs(context,text);
   if(named.length) return named.length===1?named[0]:named.find(j=>j.id===explicit?.id) || null;
   const open=j=>j && !['completed','cancelled'].includes(j.status);

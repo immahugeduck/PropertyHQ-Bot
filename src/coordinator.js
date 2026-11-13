@@ -140,6 +140,8 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result('Thanks! I’ll pass your availability to the team for new options.',action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts)}));
   }
   if (type==='start_work' || type==='complete_work' || type==='report_progress') {
+    if (job.status==='completed' && type==='complete_work') return result(`Request #${job.job_number} is already completed. Your earlier completion update is saved.`);
+    if (job.status==='cancelled') return result(`Request #${job.job_number} is cancelled. Please check with the manager before arranging further work.`);
     if (job.status==='completed' && type!=='complete_work') return result('That job is completed. Please clarify whether a new request is needed.');
     if(type==='complete_work' && job.coordinator_review_status==='inspection_authorized') return result('Inspection recorded. I’ll send the findings to the manager for review before any installation or work is approved.',[{type:'complete_inspection',jobId:job.id,fields:{description:clean(fields.description)||clean(context.inbound)}}]);
     return result(`Recorded for #${job.job_number}. Notifications are queued for the manager and any verified tenant contact.`,action({description:clean(fields.description)}));

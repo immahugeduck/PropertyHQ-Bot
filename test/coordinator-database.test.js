@@ -29,6 +29,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261111003933_manager_review_replies.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261111214912_context_followup.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261112235510_maintenance_dispatch_gate.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261113032510_visit_status_checkins.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);

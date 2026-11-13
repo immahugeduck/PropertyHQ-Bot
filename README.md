@@ -276,8 +276,11 @@ invalid dates ask for a confirmed day/time instead of changing the appointment.
 A greeting or acknowledgement on the Property HQ path does not open a repair.
 Emergency classification still runs before tenant schedule recall.
 
-This is request-linked schedule memory, not a general calendar or reminder
-service. Saving an appointment does not create an automatic future reminder.
+Confirmed maintenance visits now receive one check-in at the scheduled time,
+asking maintenance to reply when finished. The existing delivery runner generates
+it on its next minute tick. Cancellation, rescheduling, completion and changed
+entry permission are checked again before delivery; old visits are not replayed.
+The clock does not mark work started or finished.
 Inkbox replies use the Agent HQ name but do not have Property HQ schedule recall;
 the existing Twilio SMS/voice intake provides that database integration.
 The Inkbox provider identity and GitHub repository name are unchanged.
@@ -342,3 +345,18 @@ Unsent tenant details update the same queued request. Once delivered, only mater
 Suggestions use configured working days/hours, recorded visits, maintenance calendar blocks and portal bookings; staff can replace them. Proposed internal reservations are one hour, not a promised repair duration. A date-only portal booking occupies that day until a precise time is recorded. The bot searches the next fourteen days with at least one-hour lead time. Approval is bound to the exact displayed proposal and conflicts are rechecked atomically, including portal writes. Private suggestions cannot become tenant options merely by asking for alternatives.
 
 Apply additive migration `20261112235510_maintenance_dispatch_gate.sql` after the previously released handoff, manager-review and context migrations before this bot version. Previously applied pilot migrations must not be blindly reapplied. The new migration does not replay messages, grant permission or book existing requests. See [dispatch verification](docs/MAINTENANCE_DISPATCH_RESULTS.md) for examples and release evidence.
+
+
+## Scheduled maintenance check-ins
+
+Apply `20261113032510_visit_status_checkins.sql` before this version. The existing
+enabled minute delivery runner discovers confirmed visits as they begin and sends
+one check-in asking maintenance to reply `DONE <request number>` when finished.
+The tenant receives a completion notice only after verified staff respond. A
+progress update keeps the request open; explicit private notes remain internal.
+
+Check-ins are unique per account, request and exact visit time, independently of
+phone routing. Sent, sending and uncertain attempts are consumed; a never-attempted
+queued notice can be safely updated or rerouted. The worker rechecks appointment,
+access, review scope and destination before sending. See
+[check-in verification](docs/VISIT_CHECKIN_RESULTS.md) for tested examples.
