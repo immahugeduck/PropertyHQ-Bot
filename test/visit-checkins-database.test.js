@@ -19,7 +19,7 @@ test('a check-in starts at the saved appointment time, stays compact, and never 
  const f=await coordinatorFixture();try {
   const j=await scheduled(f);assert.equal(await enqueue(f,new Date(Date.parse(j.start_at)-1).toISOString()),0);assert.equal((await reminders(f)).length,0);
   assert.equal(await enqueue(f,j.start_at),1);const row=(await reminders(f))[0];assert.equal(row.request_id,j.id);assert.equal(Date.parse(row.visit_checkin_at),Date.parse(j.start_at));
-  assert.match(row.body,/Visit check-in.*Bree Fixture.*508 Fixture St/s);assert.match(row.body,/No hot water/i);assert.match(row.body,new RegExp('DONE '+j.job_number));assert.doesNotMatch(row.body,/work (?:has )?(?:started|finished)|New maintenance request|Tenant prefers/i);
+  assert.match(row.body,/Visit check-in.*Bree Fixture.*508 Fixture St/s);assert.match(row.body,/No hot water/i);assert.match(row.body,new RegExp('DONE #'+j.job_number));assert.doesNotMatch(row.body,/work (?:has )?(?:started|finished)|New maintenance request|Tenant prefers/i);
   assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'open');assert.equal((await f.db.query('select count(*)::int as n from public.coordinator_outbox where tenant_id=$1',[c.tenant])).rows[0].n,0);
  } finally {await f.close();}
 });
@@ -102,18 +102,18 @@ for(const state of ['queued','sent','sending','uncertain']) test('rerouting pres
 test('inspection DONE returns to manager review instead of reporting installation complete',async()=>{
  const f=await coordinatorFixture();try {
   const j=await scheduled(f,{review:'inspection_authorized'});const row=(await claim(f))[0];assert.match(row.body,/Scope: inspection only/);await f.db.query("update public.coordinator_outbox set status='sent' where id=$1",[row.id]);
-  const done=await f.run(c.maintenance,'DONE '+j.job_number);const job=(await f.context(c.tenantPhone)).jobs[0];assert.equal(job.coordinator_review_status,'awaiting_manager_response');assert.equal(job.scheduled_at,null);assert.equal(job.status,'open');
+  const done=await f.run(c.maintenance,'DONE #'+j.job_number);const job=(await f.context(c.tenantPhone)).jobs[0];assert.equal(job.coordinator_review_status,'awaiting_manager_response');assert.equal(job.scheduled_at,null);assert.equal(job.status,'open');
   assert.ok((await f.outbox(done.sid,c.manager)).length);assert.match((await f.outbox(done.sid,c.tenantPhone))[0].body,/inspection.*manager.*review/i);assert.doesNotMatch((await f.outbox(done.sid,c.tenantPhone))[0].body,/has finished.*work/i);
  } finally {await f.close();}
 });
 test('delivered check-in plus DONE completes only that repair and sends one tenant notice',async()=>{
  const f=await coordinatorFixture();try {
   const j=await scheduled(f);const row=(await claim(f))[0];await f.db.query("update public.coordinator_outbox set status='sent' where id=$1",[row.id]);
-  const done=await f.run(c.maintenance,'DONE '+j.job_number);assert.match(done.reply,/recorded|complete/i);assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'completed');
+  const done=await f.run(c.maintenance,'DONE #'+j.job_number);assert.match(done.reply,/recorded|complete/i);assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'completed');
   const tenantRows=async()=>(await f.db.query('select body from public.coordinator_outbox where request_id=$1 and to_number=$2',[j.id,c.tenantPhone])).rows;
   assert.equal((await tenantRows()).length,1);assert.match((await tenantRows())[0].body,/finished/i);assert.doesNotMatch((await tenantRows())[0].body,/#\d+|staff note/i);
-  await f.run(c.maintenance,'DONE '+j.job_number);assert.equal((await tenantRows()).length,1);
-  const ctx=await f.context(c.maintenance);await f.db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb)',[c.user,c.maintenance,'SMrepeatRaw',ctx.version,'DONE '+j.job_number,JSON.stringify({reply:'Already finished',nextState:{},actions:[{type:'complete_work',jobId:j.id,fields:{description:'Repeated completion'}}]})]);assert.equal((await tenantRows()).length,1,'SQL must independently suppress repeated completion notifications');
+  await f.run(c.maintenance,'DONE #'+j.job_number);assert.equal((await tenantRows()).length,1);
+  const ctx=await f.context(c.maintenance);await f.db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb)',[c.user,c.maintenance,'SMrepeatRaw',ctx.version,'DONE #'+j.job_number,JSON.stringify({reply:'Already finished',nextState:{},actions:[{type:'complete_work',jobId:j.id,fields:{description:'Repeated completion'}}]})]);assert.equal((await tenantRows()).length,1,'SQL must independently suppress repeated completion notifications');
  } finally {await f.close();}
 });
 test('check-ins are account scoped and unavailable to public client roles',async()=>{

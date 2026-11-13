@@ -153,7 +153,7 @@ test('washer workflow books only after maintenance approval, then recalls and co
     const started=await f.run(c.maintenance,'Starting the washer repair',{model:{type:'start_work',jobId:saved.id,fields:{description:'Starting the washer repair'}}});
     assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'in_progress');
     assert.ok((await f.outbox(started.sid,c.tenantPhone)).some(n=>/getting started/i.test(n.body)));
-    const completed=await f.run(c.maintenance,'Washer repaired',{model:{type:'complete_work',jobId:saved.id,fields:{description:'Washer repaired'}}});
+    const completed=await f.run(c.maintenance,'DONE #'+saved.job_number);
     assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'completed');
     assert.ok((await f.outbox(completed.sid,c.tenantPhone)).some(n=>/finished/i.test(n.body)));
     const countBefore=(await f.db.query('select count(*)::int as n from public.coordinator_outbox')).rows[0].n;

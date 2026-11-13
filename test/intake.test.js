@@ -76,6 +76,11 @@ test('does nothing when Supabase is not configured', async () => {
   assert.equal(backend.calls.length, 0);
 });
 
+for(const text of ['Okay thank you!','Thank you so much!','Have a good day! Thank you!','Thanks for the update.','Much appreciated, take care!'])test('a fallback tenant thank-you closes warmly without filing another repair: '+text,async()=>{
+ const backend=fakeBackend();const result=await run(text,backend);assert.ok(result.staffReply?.endsWith('If anything else comes up let us know, thank you. Have a good day!'));
+ assert.equal(backend.calls.some(c=>c.method==='POST'&&c.url.includes('/maintenance_requests')),false);
+});
+
 test('does nothing when the Twilio number has no triage settings row', async () => {
   const backend = fakeBackend({ settings: null });
   assert.equal(await run('sink leaking', backend), null);

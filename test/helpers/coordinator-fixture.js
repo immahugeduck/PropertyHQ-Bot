@@ -35,7 +35,7 @@ export async function coordinatorFixture() {
     }
     const migrationDir=new URL('supabase/migrations/',hq);
     const files=await readdir(migrationDir);
-    const migrations=[...baseMigrations,...files.filter(f=>f.endsWith('_tenant_maintenance_handoff.sql')||f.endsWith('_manager_review_replies.sql')||f.endsWith('_context_followup.sql')||f.endsWith('_maintenance_dispatch_gate.sql')||f.endsWith('_visit_status_checkins.sql')).sort()];
+    const migrations=[...baseMigrations,...files.filter(f=>f.endsWith('_tenant_maintenance_handoff.sql')||f.endsWith('_manager_review_replies.sql')||f.endsWith('_context_followup.sql')||f.endsWith('_maintenance_dispatch_gate.sql')||f.endsWith('_visit_status_checkins.sql')||f.endsWith('_tenant_closing_strict_done.sql')).sort()];
     for(const file of migrations) await db.exec(await readFile(new URL(file,migrationDir),'utf8'));
     const c=contacts;
     await db.query('insert into auth.users values($1)',[c.user]);

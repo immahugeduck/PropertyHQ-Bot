@@ -4,18 +4,19 @@
  *
  *   "1003 tomorrow 2pm"  -> schedule job #1003, text the tenant and manager
  *   "be there at 12:30"  -> schedule the job most recently alerted to that phone
- *   "1003 done"          -> mark complete, text the tenant and manager
+ *   "DONE #1003"         -> mark complete, text the tenant and manager
  *
  * Anything else gets a short how-to reply. Staff texts never open requests.
  */
 import { supabaseRequest, eq } from './supabase.js';
 import { logMessage, sendSms } from './intake.js';
 import { normalizePhoneNumber } from './twilio.js';
+import {parseCompletionCommand,looksLikeCompletionCommand} from './completion-command.js';
+import {TENANT_CLOSING} from './tenant-language.js';
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const COMPLETE_WORDS = /\b(done|complete|completed|finished|fixed|resolved|all set)\b/i;
 const HELP =
-  'To update a job, text the job number and a time or "done". Examples: "1003 tomorrow 2pm", "1003 12:30", "1003 done". "1003 <message>" texts that job\'s tenant. Text "?" to see this again.';
+  'To update a job, text the job number and a time. Examples: "1003 tomorrow 2pm", "1003 12:30". To complete a request, send exactly DONE or DONE #1003 in uppercase. "1003 <message>" texts that job\'s tenant. Text "?" to see this again.';
 
 /** Calendar date and wall-clock parts of `date` in `timeZone`. */
 function zonedParts(date, timeZone) {
@@ -130,16 +131,18 @@ export function parseScheduleTime(text, now, timeZone) {
 /** Work out what a staff text asks for. */
 export function parseStaffCommand(text, now, timeZone) {
   const body = String(text ?? '');
-  // A job number has to lead the text ("1003 done") or be marked ("#1003",
+  // A job number has to lead the text ("1003 tomorrow 2pm") or be marked ("#1003",
   // "job 1003") so street numbers and years ("1234 Main St") aren't mistaken for one.
   const job = body.match(/^\s*#?(\d{4,6})\b(?!\s*[:/]|\s*(?:am|pm|a\.m|p\.m))|(?:#|\bjob\s*#?)\s*(\d{4,6})\b/i);
   const jobNumber = job ? Number(job[1] ?? job[2]) : null;
+  const completion=parseCompletionCommand(body);
+  if(completion) return {action:'complete',jobNumber:completion.jobNumber?Number(completion.jobNumber):null};
+  if(looksLikeCompletionCommand(body)) return {action:'ignore',jobNumber};
   if (/\b(when|what time|remind me|schedule|scheduled|appointment)\b/i.test(body) && /\?|\b(when|what time|show|recall|remind me)\b/i.test(body)) return { action: 'recall', jobNumber };
   if (/\bcancel\b|\b(?:not|don’t|don't)\s+(?:done|complete|finished|fixed|resolved)\b/i.test(body) || (/\b(can|could|maybe|might|available|between|after|before|not|don’t|don't)\b|\d\s*(?:am|pm)?\s*[-–]\s*\d/i.test(body) && parseScheduleTime(body, now, timeZone))) return { action: 'clarify', jobNumber };
   const scheduledAt = parseScheduleTime(body, now, timeZone);
   if (scheduledAt) return { action: 'schedule', jobNumber, scheduledAt };
   if ((jobNumber || body.trim().split(/\s+/).length <= 6) && /\b(tomorrow|today|tonight|morning|afternoon|schedule)\b|\d{1,2}:\d{2}|\d\s*(?:am|pm)\b/i.test(body)) return { action: 'clarify', jobNumber };
-  if (COMPLETE_WORDS.test(body)) return { action: 'complete', jobNumber };
   return { action: 'help', jobNumber };
 }
 
@@ -211,15 +214,16 @@ const fullName = (tenant) => (tenant ? [tenant.first_name, tenant.last_name].fil
  * text for the staff member. The inbound message is already logged.
  *
  * Short texts or texts starting with a job number are commands ("1003 2pm",
- * "done"). A longer free-text reply to an alert or forwarded question is
- * relayed word for word to that tenant, and still schedules or completes the
- * job if it names a time or says it's done.
+ * "DONE"). A longer free-text reply to an alert or forwarded question is
+ * relayed word for word to that tenant and schedules the job if it names a time.
+ * Only the exact uppercase completion commands can complete the job.
  */
 export async function handleStaffMessage({ db, settings, party, message, inboundId, fromNumber, twilioNumber, env, fetchImpl, now }) {
   const userId = settings.user_id;
   const timeZone = settings.timezone || 'America/Indiana/Indianapolis';
   const text = String(message ?? '').trim();
   const command = parseStaffCommand(text, now, timeZone);
+  if(command.action==='ignore') return '';
   const startsWithJob = /^#?\d{4,6}\b/.test(text);
   const commandStyle = Boolean(command.jobNumber) || startsWithJob || text.split(/\s+/).length <= 6;
   const ctx = { db, settings, userId, timeZone, fromNumber, twilioNumber, env, fetchImpl, now, inboundId };
@@ -345,7 +349,7 @@ async function applyUpdate(ctx, { request, command, tenant, notifyTenant }) {
     if (!res.ok) return `Sorry, I couldn't update job #${request.job_number}. Please try again or update it in Property HQ.`;
     completedAt = (Array.isArray(res.data) && res.data[0]?.completed_at) || now.toISOString();
     kind = 'completion_notice';
-    tenantText = `First Call Maintenance: your request #${request.job_number} has been completed. If anything still isn't right, reply to this text.`;
+    tenantText = `First Call Maintenance: your request #${request.job_number} has been completed. ${TENANT_CLOSING}`;
     managerText = `FCM update: job #${request.job_number} (${who}${where ? ` @ ${where}` : ''}) completed.`;
     staffReply = `Job #${request.job_number} marked complete.`;
   }

@@ -38,10 +38,14 @@ test('parseStaffCommand picks schedule, complete, or help', () => {
     { ...parseStaffCommand('1003 tomorrow 2pm', NOW, TZ), scheduledAt: undefined },
     { action: 'schedule', jobNumber: 1003, scheduledAt: undefined }
   );
-  assert.deepEqual(parseStaffCommand('#1003 done', NOW, TZ), { action: 'complete', jobNumber: 1003 });
-  assert.deepEqual(parseStaffCommand('all set at Berkshire', NOW, TZ), { action: 'complete', jobNumber: null });
+  assert.deepEqual(parseStaffCommand('DONE #1003', NOW, TZ), { action: 'complete', jobNumber: 1003 });
+  assert.deepEqual(parseStaffCommand('all set at Berkshire', NOW, TZ), { action: 'ignore', jobNumber: null });
   assert.equal(parseStaffCommand('be there at 12:30 to resolve both issues', NOW, TZ).action, 'schedule');
   assert.deepEqual(parseStaffCommand('hello?', NOW, TZ), { action: 'help', jobNumber: null });
+});
+
+for(const text of ['done','Done','done #1003','DONE 1003','DONE1003','done1003','DONE Replaced water heater elements.'])test('legacy staff completion variants cause no updates or relayed messages: '+text,async()=>{
+ const backend=fakeBackend({pending:PENDING});const result=await staffText(text,backend);assert.equal(result.staffReply,'');assert.equal(decorateReply('ignored triage',result),'');assert.equal(twilioTexts(backend).length,0);assert.equal(backend.calls.some(c=>c.method==='PATCH'&&c.url.includes('/maintenance_requests')),false);
 });
 
 const ENV = {
@@ -118,9 +122,9 @@ test('a short staff reply with a time schedules the last alerted job and texts t
   assert.equal(decorateReply('ignored triage text', result), 'Got it. Job #1003 scheduled Wed, Oct 14 at 12:30 PM. Tenant notified.');
 });
 
-test('"1003 done" completes the job and records the completion notice', async () => {
+test('"DONE #1003" completes the job and records the completion notice', async () => {
   const backend = fakeBackend();
-  const result = await staffText('1003 done', backend);
+  const result = await staffText('DONE #1003', backend);
 
   const lookup = backend.calls.find((c) => c.method === 'GET' && c.url.includes('/maintenance_requests'));
   assert.match(lookup.url, /job_number=eq\.1003/);
@@ -136,7 +140,7 @@ test('"1003 done" completes the job and records the completion notice', async ()
 
 test('the manager texting an update does not text themselves', async () => {
   const backend = fakeBackend();
-  await staffText('1003 done', backend, '+13176456088');
+  await staffText('DONE #1003', backend, '+13176456088');
   assert.deepEqual(twilioTexts(backend).map((t) => t.To), ['+17652464405']);
 });
 
@@ -150,7 +154,7 @@ test('a staff text that is not an update, with nothing to answer, gets the how-t
 
 test('an unknown job number is reported back to staff', async () => {
   const backend = fakeBackend({ request: null });
-  const result = await staffText('1099 done', backend);
+  const result = await staffText('DONE #1099', backend);
   assert.match(result.staffReply, /^I couldn't find job #1099/);
   assert.equal(twilioTexts(backend).length, 0);
 });
@@ -205,7 +209,7 @@ test('"1003 <message>" sends the message to that job\'s tenant', async () => {
 
 test('short commands still act as commands even with a pending question', async () => {
   const backend = fakeBackend({ pending: PENDING });
-  const result = await staffText('1003 done', backend);
+  const result = await staffText('DONE #1003', backend);
   assert.equal(result.staffReply, 'Job #1003 marked complete. Tenant notified.');
   assert.ok(!backend.calls.some((c) => c.method === 'POST' && c.body?.kind === 'staff_relay'));
 });

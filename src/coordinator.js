@@ -1,7 +1,8 @@
 import { decideStaffScheduling } from './staff-scheduling.js';
 import {isReviewPending,decideManagerCommand,reviewStatus} from './manager-review.js';
 import { workingStaffJob } from './staff-context.js';
-import { repairLabel } from './tenant-language.js';
+import { repairLabel,TENANT_CLOSING,tenantClosingReply } from './tenant-language.js';
+import {parseCompletionCommand,looksLikeCompletionCommand} from './completion-command.js';
 import { mergeFacts, inspectionReply } from './intake-details.js';
 import { validOptions, optionText, formatWhen, summarizeJobs } from './appointments.js';
 const staffTypes = new Set(['request_times','approve_suggestions','schedule_visit','related_jobs','staff_event','mock_schedule','offer_times','confirm_options','start_work','report_progress','complete_work','approve_contact','unlink_contact']);
@@ -16,6 +17,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result(safety.response.replace(/Maintenance is being alerted now\./g,'').trim()+' I’ll try to pass this to the manager. If you need immediate help, contact emergency services.',[{type:'emergency',jobId:active?.id,fields:{description:clean(context.inbound),category:safety.category}}]);
   }
   const type = intent?.type || 'clarify', fields = intent?.fields || {};
+  if(staff && !parseCompletionCommand(context.inbound) && looksLikeCompletionCommand(context.inbound)) return result('');
   if(['send_manager_reply','authorize_manager_request','manager_review_note'].includes(type)) return decideManagerCommand({context,intent,nextState});
   if (staffTypes.has(type) && !staff) return result('I can help with your maintenance request. Only our staff can make that change.');
   if(staff && type==='clarify' && fields.scheduleClarification) {
@@ -56,6 +58,10 @@ export function decideConversation({ context: original, intent, safety, now = ne
   }
   if(type==='conversation_note') return result('I’ve kept that note with this conversation.');
   if(type==='staff_acknowledgement' && staff) return result('');
+  if(type==='tenant_closing' && !staff) {
+    const job=context.jobs.find(j=>j.id===(intent.jobId || context.state?.activeJobId)) || (context.jobs.length===1?context.jobs[0]:null);
+    return {...result(tenantClosingReply()),...(job?{replyJobId:job.id}:{})};
+  }
   if(type==='mock_schedule') return result('Example only — not saved: Monday 9 AM, property check; Tuesday 1 PM, maintenance follow-ups. To add a real staff-only entry, send the task, day and time.');
   if(type==='staff_event') {
     const pending=nextState.pendingStaffEvent || {};
@@ -111,7 +117,7 @@ export function decideConversation({ context: original, intent, safety, now = ne
       const reply=job.coordinator_review_status==='awaiting_tenant_response' && /\b(?:quote|estimate)\b/i.test(job.coordinator_manager_reply||'')
         ? 'You’re welcome. If you decide to move forward, send the quote here and I’ll pass it along to your property manager for review.'
         : 'You’re welcome. Just message us here if you have another update.';
-      return result(reply,[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound),notifyManager:false}}]);
+      return result(`${reply} ${TENANT_CLOSING}`,[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound),notifyManager:false}}]);
     }
     if(!staff && ['add_details','request_alternatives'].includes(type)) return result('Thanks, I’ll pass that update to your property manager for review.',[{type:'review_followup',jobId:job.id,fields:{description:clean(context.inbound)||clean(fields.description),facts:mergeFacts({},fields.facts),notifyManager:true}}]);
     return result('This request is awaiting manager review and approval before maintenance can arrange a visit.');
@@ -148,6 +154,10 @@ export function decideConversation({ context: original, intent, safety, now = ne
     return result('Thanks! I’ll pass your availability to the team for new options.',action({description:clean(fields.description)||clean(context.inbound),facts:mergeFacts({},fields.facts)}));
   }
   if (type==='start_work' || type==='complete_work' || type==='report_progress') {
+    if(type==='complete_work') {
+      const command=parseCompletionCommand(context.inbound);
+      if(!command || (command.jobNumber && command.jobNumber!==String(job.job_number))) return result('');
+    }
     if (job.status==='completed' && type==='complete_work') return result(`Request #${job.job_number} is already completed. Your earlier completion update is saved.`);
     if (job.status==='cancelled') return result(`Request #${job.job_number} is cancelled. Please check with the manager before arranging further work.`);
     if (job.status==='completed' && type!=='complete_work') return result('That job is completed. Please clarify whether a new request is needed.');

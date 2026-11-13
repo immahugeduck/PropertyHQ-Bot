@@ -13,12 +13,15 @@ no extra scheduler, recurring agent run or new messaging provider is needed.
 
 - At a confirmed visit time, maintenance receives one brief request-linked
   check-in with the tenant/property, short repair summary and current access
-  precautions. It prompts `Reply DONE 1013 when finished, or send a progress update.`
+  precautions. Following the tenant-closing upgrade, it prompts maintenance to
+  reply `DONE` or `DONE #1013` when finished.
 - The next minute tick creates and claims the message. A fifteen-minute recovery
   window tolerates a short scheduling interruption; older appointments do not
   produce a historical backlog. Provider delivery time can vary.
-- Native staff parsing accepts `DONE 1013`, `1013 done` and a focused `Done` or
-  `Finished` reply. Unknown numbers and ambiguous requests require clarification.
+- The current completion policy accepts only exact uppercase `DONE` or
+  `DONE #1013`. Lowercase, extra words, synonyms and a number without `#` are quiet
+  no-ops. This supersedes the permissive formats used in the initial check-in test.
+  Unknown numbers and ambiguous requests require clarification.
   A verified completion marks that repair complete and queues the friendly tenant
   completion notice. Repeated completion with a new inbound SID does not repeat it.
 - `Not finished yet. I need a replacement part.` stays a progress update. A timer

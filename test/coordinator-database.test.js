@@ -11,7 +11,7 @@ const from='+13175551111', manager='+13175556088', maintenance='+13175559030';
 const db=new PGlite();
 const sqlFile=p=>readFile(new URL('../../PropertyHQ/'+p,import.meta.url),'utf8');
 let seq=0;
-const commit=async(phone,version,actions,nextState={},sid=`SM${++seq}`)=> (await db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb) as r',[user,phone,sid,version,'fixture message',JSON.stringify({reply:'Fixture reply',actions,nextState})])).rows[0].r;
+const commit=async(phone,version,actions,nextState={},sid=`SM${++seq}`,message='fixture message')=> (await db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb) as r',[user,phone,sid,version,message,JSON.stringify({reply:'Fixture reply',actions,nextState})])).rows[0].r;
 const ctx=async(phone)=>(await db.query('select public.coordinator_context($1,$2) as r',['+13175550000',phone])).rows[0].r;
 test('real migration: tenant isolation, durable context, appointment lifecycle, retries and permissions',async()=>{
  try {
@@ -30,6 +30,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  await db.exec(await sqlFile('supabase/migrations/20261111214912_context_followup.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261112235510_maintenance_dispatch_gate.sql'));
  await db.exec(await sqlFile('supabase/migrations/20261113032510_visit_status_checkins.sql'));
+ await db.exec(await sqlFile('supabase/migrations/20261113195720_tenant_closing_strict_done.sql'));
  await db.query('insert into auth.users values ($1),($2)',[user,other]);
  await db.query('insert into public.triage_settings(user_id,twilio_number,maintenance_phone,manager_phone) values($1,$2,$3,$4)',[user,'+13175550000',maintenance,manager]);
  await db.query('insert into public.tenants(id,user_id,property_id,first_name,last_name,email,phone) values($1,$2,$3,$4,$5,$6,$7)',[tenant,user,property,'Sarah','Fixture','test@example.invalid',from]);
@@ -54,7 +55,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  const secondVersion=(await ctx(from)).jobs.find(j=>j.id===second).proposal_version;
  await assert.rejects(commit(from,3,[{type:'select_time',jobId:second,fields:{choice:1,proposalVersion:secondVersion}}]),/unavailable/);
  assert.equal((await ctx(from)).version,3);
- await commit(manager,0,[{type:'complete_work',jobId:job,fields:{}}]);
+ await commit(manager,0,[{type:'complete_work',jobId:job,fields:{}}],{},'SMvalidComplete','DONE');
  assert.equal((await ctx(from)).jobs.find(j=>j.id===job).status,'completed');
  assert.equal((await db.query("select count(*)::int n from public.coordinator_outbox where to_number=$1",[from])).rows[0].n,3);
  const tenantNotices=(await db.query('select body from public.coordinator_outbox where tenant_id=$1',[tenant])).rows;
@@ -118,7 +119,7 @@ test('real migration: tenant isolation, durable context, appointment lifecycle, 
  assert.equal((await db.query("select count(*)::int n from public.coordinator_outbox where to_number=$1 and status='queued'",[from])).rows[0].n,0);
  const claimed=await db.query('select * from public.coordinator_claim_outbox($1)',[user]);assert.equal(claimed.rows.length,2);assert.equal(claimed.rows.some(r=>r.to_number===from),false);
  const again=await db.query('select * from public.coordinator_claim_outbox($1)',[user]);assert.equal(again.rows.some(x=>claimed.rows.some(y=>y.id===x.id)),false);
- await db.query("insert into public.maintenance_requests(user_id,property_id,title,description) values($1,$2,'Foreign','Private') returning id",[other,property]).then(async r=>{await assert.rejects(commit(manager,4,[{type:'complete_work',jobId:r.rows[0].id,fields:{}}]),/no rows/);});
+ await db.query("insert into public.maintenance_requests(user_id,property_id,title,description) values($1,$2,'Foreign','Private') returning id",[other,property]).then(async r=>{await assert.rejects(commit(manager,4,[{type:'complete_work',jobId:r.rows[0].id,fields:{}}],{},'SMforeignComplete','DONE'),/no rows/);});
  // Form submission atomically queues the staff alert and verified-tenant acknowledgement.
  const form=(await db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,source) values($1,$2,$3,'Kitchen window screen','Window screen needs repair','app') returning id",[user,property,tenant])).rows[0];
  const formRows=(await db.query("select to_number,body from public.coordinator_outbox where event_sid=$1",['app-maintenance:'+form.id])).rows;

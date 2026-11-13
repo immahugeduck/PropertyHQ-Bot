@@ -150,7 +150,7 @@ test('pending review blocks forged scheduling and portal scheduling, even with e
   await create(f);const job=(await f.context(c.tenantPhone)).jobs[0];
   const options=[{start:'2035-01-02T15:00:00Z',end:'2035-01-02T16:00:00Z'}];
   for(const type of ['offer_times','book_visit','start_work','complete_work','add_details','report_progress','request_scheduling']) {
-   await assert.rejects(rawCommit(f,c.maintenance,'Attempt '+type,{type,jobId:job.id,fields:{options,facts:{entryPermission:true},description:'Unapproved'}}),/manager.*approval|manager.*review/);
+   await assert.rejects(rawCommit(f,c.maintenance,type==='complete_work'?'DONE':'Attempt '+type,{type,jobId:job.id,fields:{options,facts:{entryPermission:true},description:'Unapproved'}}),/manager.*approval|manager.*review/);
   }
   await assert.rejects(f.db.query('update public.maintenance_requests set scheduled_at=$2 where id=$1',[job.id,options[0].start]),/manager.*approval|manager.*review/);
   const check=await f.run(c.tenantPhone,'What is happening with the spigot?',{model:{type:'request_status',jobId:job.id,fields:{}}});
@@ -174,11 +174,13 @@ test('inspection authorization starts access coordination, while completion retu
   await f.db.query("update public.coordinator_outbox set status='sent' where event_sid=$1 and to_number=$2",[grant.sid,c.maintenance]);
   await f.run(c.maintenance,'1');
   job=(await f.context(c.tenantPhone)).jobs[0];assert.ok(job.scheduled_at);
-  const finished=await f.run(c.maintenance,'Inspection complete, a plumber would need to install the line.',{model:{type:'complete_work',jobId:job.id,fields:{description:'Inspection complete; plumber needed for installation.'}}});
+  const findings=await f.run(c.maintenance,'A plumber is needed for installation.',{model:{type:'report_progress',jobId:job.id,fields:{description:'A plumber is needed for installation.'}}});
+  assert.ok((await f.outbox(findings.sid,c.manager)).some(n=>/plumber.*needed/.test(n.body)));
+  const finished=await f.run(c.maintenance,'DONE #'+job.job_number);
   job=(await f.context(c.tenantPhone)).jobs[0];
   assert.equal(job.coordinator_review_status,'awaiting_manager_response');assert.equal(job.scheduled_at,null);assert.equal(job.status,'open');
   assert.equal(job.coordinator_details.entryPermission,undefined,'an inspection grant must not become installation access');
-  assert.ok((await f.outbox(finished.sid,c.manager)).some(n=>/plumber needed/.test(n.body)));
+  assert.ok((await f.outbox(finished.sid,c.manager)).some(n=>/review|inspection/i.test(n.body)));
   assert.equal((await f.outbox(finished.sid,c.maintenance)).length,0);
   await f.run(c.manager,'APPROVE WORK');
   assert.equal((await f.context(c.tenantPhone)).jobs[0].coordinator_review_status,'work_authorized');

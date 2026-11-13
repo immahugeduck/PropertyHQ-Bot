@@ -65,9 +65,9 @@ test('a negated duplicate statement cannot write an opposite relationship note',
  const c=base();c.inbound='1007 and 1008 are not the same job.';
  const i=await interpretMessage({context:c,text:c.inbound,env:{}});const d=decide(c,i);assert.notEqual(i.type,'related_jobs');assert.equal(d.actions.length,0);
 });
-for(const text of ['Schedule job 1007 for Tuesday at 11 am','Job 1007 is completed']) test(`pending availability does not override a new staff instruction: ${text}`,async()=>{
+for(const text of ['Schedule job 1007 for Tuesday at 11 am','DONE #1007']) test(`pending availability does not override a new staff instruction: ${text}`,async()=>{
  const c=base();c.state.pendingStaffOffer={options};
- const expected=text.includes('completed')?{type:'complete_work',jobId:'one',fields:{}}:{type:'offer_times',jobId:'one',fields:{options:[{start:'2026-11-10T16:00:00Z',end:'2026-11-10T17:00:00Z'}]}};
+ const expected=text.startsWith('DONE')?{type:'complete_work',jobId:'one',fields:{}}:{type:'offer_times',jobId:'one',fields:{options:[{start:'2026-11-10T16:00:00Z',end:'2026-11-10T17:00:00Z'}]}};
  const i=await interpretMessage({context:c,text,env:{OPENAI_API_KEY:'fixture'},fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(expected)}}]})})});
  assert.equal(i.type,expected.type);assert.deepEqual(i.fields.options,expected.fields.options);
 });

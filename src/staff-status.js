@@ -1,4 +1,5 @@
 import {workingStaffJob} from './staff-context.js';
+import {parseCompletionCommand,looksLikeCompletionCommand} from './completion-command.js';
 
 function statusJobId(context,text) {
   if(/(?:#|\b(?:job|request)\b)\s*\d{4,}/i.test(text)) return workingStaffJob(context,text)?.id || 'unresolved';
@@ -15,15 +16,14 @@ function statusJobId(context,text) {
 export function interpretStaffStatus({context,text}) {
   if(!['maintenance','manager'].includes(context.identity.role)) return;
   const answer=text.trim();
-  const privateNote=/^(?:internal(?: staff)?|private(?: staff)?|staff[- ]only) (?:note|update)\b|\b(?:do not|don't|don’t|dont)\s+(?:send|share|forward|text|message|notify)\b[^.!?;\n]*\btenant\b|\b(?:no|without) tenant (?:message|notification)\b/i.test(answer);
-  if(privateNote) return {type:'add_details',jobId:statusJobId(context,text),fields:{description:text}};
-  const first=answer.match(/^(?:(?:job|request)\s+)?#?(\d{4,})\s+(?:is\s+)?(?:done|finished|complete(?:d)?)[.! ]*$/i);
-  const last=answer.match(/^(?:done|finished|complete(?:d)?)(?:\s+(?:(?:job|request)\s+)?#?(\d{4,}))?[.! ]*$/i);
-  if(first || last) {
-    const number=first?.[1] || last?.[1];
-    const id=number?context.jobs.find(j=>String(j.job_number)===number)?.id || number:statusJobId(context,text);
+  const command=parseCompletionCommand(answer);
+  if(command) {
+    const id=command.jobNumber?context.jobs.find(j=>String(j.job_number)===command.jobNumber)?.id || command.jobNumber:statusJobId(context,text);
     return {type:'complete_work',jobId:id,fields:{description:text}};
   }
+  if(looksLikeCompletionCommand(answer)) return {type:'staff_acknowledgement',fields:{}};
+  const privateNote=/^(?:internal(?: staff)?|private(?: staff)?|staff[- ]only) (?:note|update)\b|\b(?:do not|don't|don’t|dont)\s+(?:send|share|forward|text|message|notify)\b[^.!?;\n]*\btenant\b|\b(?:no|without) tenant (?:message|notification)\b/i.test(answer);
+  if(privateNote) return {type:'add_details',jobId:statusJobId(context,text),fields:{description:text}};
   if(context.identity.role==='maintenance' && /^(?:(?:i(?:['’]m| am)|we(?:['’]re| are))\s+)?(?:still\s+)?not(?: quite)? (?:done|finished|complete(?:d)?)\b|^(?:(?:i|we)\s+)?(?:haven['’]?t|have not) finished\b/i.test(answer)) {
     return {type:'report_progress',jobId:statusJobId(context,text),fields:{description:text}};
   }

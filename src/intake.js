@@ -11,6 +11,7 @@ import { supabaseConfig, supabaseRequest, eq } from './supabase.js';
 import { normalizePhoneNumber } from './twilio.js';
 import { staffParty, handleStaffMessage, formatWhen } from './staff.js';
 import { isShutoffQuestion } from './triage.js';
+import {isTenantClosing,tenantClosingReply} from './tenant-language.js';
 
 const URGENCY_BY_SEVERITY = {
   EMERGENCY: 'emergency',
@@ -187,6 +188,7 @@ export async function recordInbound({ params, message, triage, channel = 'sms', 
     }
     return { context, staffReply: reply };
   }
+  if (triage.severity === 'ROUTINE' && isTenantClosing(message)) return {context,staffReply:tenantClosingReply()};
   if (triage.severity === 'ROUTINE' && /^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(message.trim())) {
     return { context, staffReply: /thank|ok/i.test(message) ? 'You’re welcome. I’m here if you have another update or need to check an appointment.' : 'Hi, I’m Agent HQ with First Call Maintenance. What can I help you with today—a repair or an existing appointment?' };
   }
@@ -370,7 +372,7 @@ export async function recordReply(context, body) {
  */
 export function decorateReply(reply, intake) {
   if (!intake || intake.duplicate) return reply;
-  if (intake.staffReply) return intake.staffReply;
+  if (typeof intake.staffReply==='string') return intake.staffReply;
 
   // A non-emergency follow-up on an open request ("it's unit 10", "only when
   // the faucet runs") just needs an acknowledgement, not the intake questions again.

@@ -82,10 +82,11 @@ Texts from `maintenance_phone` or `manager_phone` are treated as job updates, ne
 | --- | --- |
 | `1003 tomorrow 2pm`, `1003 fri at 3`, `1003 10/20 8:15am` | Sets `scheduled_at`/`scheduled_date`, status `in_progress`; texts the tenant and the manager line |
 | `be there at 12:30` (no job number) | Same, for the open job most recently alerted to that phone |
-| `1003 done` / `fixed` / `complete` | Marks it completed (trigger stamps `completed_at`); texts the tenant and the manager line, sets `completion_notified_at` |
+| `DONE` / `DONE #1003` | Exact uppercase command marks the focused or numbered request completed; texts the tenant and manager once |
+| `done`, `DONE 1003`, `DONE` with extra words, or completion synonyms | Ignored; no repair changes, replies or alerts |
 | anything else | Replies with a short how-to; nothing changes |
 
-**Answering tenants.** Every alert and forwarded question records who sent it (`sms_messages.reply_to_number`). A longer free-text reply from a staff phone (more than six words, not starting with a job number) goes word for word to the sender of the most recent alert or question sent to that phone in the last 12 hours, as "Maintenance: ...". If that reply also names a time or says the job is done, the job is updated too and the manager line notified; the tenant just gets the tech's own words. `1003 <message>` sends a message to job #1003's tenant directly. Staff always get a confirmation naming who it went to. `?` returns the how-to (`HELP` is answered by Twilio as an opt-out keyword, so it never reaches the agent). Never text `STOP` from a staff phone: Twilio would opt that phone out of every alert until it texts `START`.
+**Answering tenants.** Every alert and forwarded question records who sent it (`sms_messages.reply_to_number`). A longer free-text reply from a staff phone (more than six words, not starting with a job number) goes word for word to the sender of the most recent alert or question sent to that phone in the last 12 hours, as "Maintenance: ...". If that reply names a time, the job is scheduled and the manager line notified; the tenant just gets the tech's own words. Completion requires a separate exact `DONE` or `DONE #1003` command. `1003 <message>` sends a message to job #1003's tenant directly. Staff get a confirmation naming who it went to. `?` returns the how-to (`HELP` is answered by Twilio as an opt-out keyword, so it never reaches the agent). Never text `STOP` from a staff phone: Twilio would opt that phone out of every alert until it texts `START`.
 
 **Shutoff questions.** Water replies tell tenants to shut off the main if they know where it is, and to text back and ask if they don't. A tenant asking where or how to shut the water off is forwarded to `maintenance_phone` (or the question rides on the alert if one is already going out), and the tenant is told maintenance will text back.
 
@@ -210,7 +211,7 @@ Example staff messages (include a job number when multiple requests exist):
 - `For 1003 offer Tuesday January 8 10–11am or Wednesday January 9 1–2pm`.
   Include a year or explicit date when ambiguity is possible. The bot asks for
   clarification instead of inventing a time. Staff reviews the interpreted dates and replies `CONFIRM OPTIONS` to publish them. Tenant replies `1` or `2`, reviews the exact date shown, then replies `CONFIRM` to book. Old or replaced proposals cannot silently book a different time.
-- `1003 work started`, `1003 waiting on a part`, `1003 complete`.
+- `1003 work started`, `1003 waiting on a part`, `DONE #1003`.
 - Unknown contact approval: inspect the pending name/address against PropertyHQ,
   then `approve +1... tenant <PropertyHQ tenant UUID>`. A phone/name/address claim
   alone never discloses the existing tenant's records. To remove a mistaken link,
@@ -353,9 +354,15 @@ Apply additive migration `20261112235510_maintenance_dispatch_gate.sql` after th
 
 Apply `20261113032510_visit_status_checkins.sql` before this version. The existing
 enabled minute delivery runner discovers confirmed visits as they begin and sends
-one check-in asking maintenance to reply `DONE <request number>` when finished.
+one check-in asking maintenance to reply `DONE` or `DONE #<request number>` when finished.
 The tenant receives a completion notice only after verified staff respond. A
 progress update keeps the request open; explicit private notes remain internal.
+
+Apply `20261113195720_tenant_closing_strict_done.sql` for exact, case-sensitive
+completion commands and warm tenant closings. Extra words, lowercase and a number
+without `#` are ignored. A tenant's plain thank-you closes the exchange without
+repeating an old appointment. Completion notices end with: "If anything else
+comes up let us know, thank you. Have a good day!"
 
 Check-ins are unique per account, request and exact visit time, independently of
 phone routing. Sent, sending and uncertain attempts are consumed; a never-attempted

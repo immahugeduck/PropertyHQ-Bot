@@ -5,20 +5,22 @@ import { entryConsent, entryAccessNotes, isEntryPermissionQuestion, isPassiveEnt
 import {interpretStaffStatus} from './staff-status.js';
 import {intentTypes as TYPES,intentSchema as schema} from './agent/contract.js';
 import {agentInstructions} from './agent/instructions.js';
+import {isTenantClosing} from './tenant-language.js';
 export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,env=process.env,signal,now=new Date()}) {
   let fallback={type:'clarify',fields:{}};
   const jobs=context.jobs || [];
   const staff=['manager','maintenance'].includes(context.identity.role);
   const review=interpretReviewMessage({context,text});
   if(review) return review;
+  if(context.identity.role==='tenant' && isTenantClosing(text)) return {type:'tenant_closing',jobId:context.messages?.find(m=>typeof m.reply==='string' && m.reply.trim())?.jobId || context.state?.activeJobId,fields:{}};
+  const status=interpretStaffStatus({context,text});
+  if(status) return status;
   if(staff && /\b(?:mock|sample|example)\b.*\bschedule\b/i.test(text)) return {type:'mock_schedule',fields:{}};
   if(staff && /(?:can|could|may) i add (?:something|an? (?:entry|event)) to my (?:schedule|calendar)/i.test(text)) return {type:'staff_event',fields:{}};
   if(/(?:what|show|check).*(?:schedule|appointments|visits).*(?:next|coming) week/i.test(text)) return {type:'request_status',fields:{filter:'next_week'}};
   const previous=context.messages?.find(m=>typeof m.reply==='string' && m.reply.trim());
   const answer=text.trim().toLowerCase().replace(/[,.!]+/g,' ').replace(/\s+/g,' ').trim();
   const staffApproval=/^(?:yes(?: please| that works)?|approve|confirm|go ahead|book it|send it|send them|that works)(?: thanks| thank you)?$/.test(answer);
-  const status=interpretStaffStatus({context,text});
-  if(status) return status;
   if(staff) {
     const job=workingStaffJob(context,text),shown=shownStaffProposal(context,job);
     const selection=text.trim().match(/^(?:(?:book|schedule|choose|option)\s+(?:option\s+)?)?([123])[.! ]*$/i);

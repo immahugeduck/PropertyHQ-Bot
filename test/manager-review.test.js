@@ -175,7 +175,7 @@ test('pending manager review cannot receive staff scheduling proposals',()=>{
 
 test('completing an authorized inspection returns the request to the manager for a work decision',()=>{
  const c=context('maintenance',[job({coordinator_review_status:'inspection_authorized'})]);
- c.inbound='Inspection complete; installation is possible.';
+ c.inbound='DONE #'+c.jobs[0].job_number;
  const d=decide(c,{type:'complete_work',jobId:'review-1',fields:{description:c.inbound}});
  assert.equal(d.actions[0]?.type,'complete_inspection');
  assert.match(d.reply,/manager.*review/i);
