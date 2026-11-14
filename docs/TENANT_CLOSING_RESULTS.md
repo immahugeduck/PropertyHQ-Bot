@@ -1,5 +1,11 @@
 # Tenant closings and exact completion commands
 
+The later completion-notes update supersedes the exact-message requirement below.
+An uppercase `DONE` clause can accompany work details. Native and SQL validation
+still reject negative, future, quoted and ambiguous completion. Apply
+`20261114001753_completion_notes.sql` after the original migration. The earlier
+verification below documents the original release.
+
 The November 13 live test confirmed that #1013's visit reminder and tenant updates
 worked. The tenant's `Okay thank you!` was classified as a status request, which
 repeated a scheduled visit instead of ending the conversation. The maintenance

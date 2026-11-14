@@ -358,9 +358,12 @@ one check-in asking maintenance to reply `DONE` or `DONE #<request number>` when
 The tenant receives a completion notice only after verified staff respond. A
 progress update keeps the request open; explicit private notes remain internal.
 
-Apply `20261113195720_tenant_closing_strict_done.sql` for exact, case-sensitive
-completion commands and warm tenant closings. Extra words, lowercase and a number
-without `#` are ignored. A tenant's plain thank-you closes the exchange without
+Apply `20261113195720_tenant_closing_strict_done.sql` and then
+`20261114001753_completion_notes.sql` for uppercase completion commands with repair
+notes and warm tenant closings. For example, `Cleared the toilet with a drain tool. DONE`
+or `DONE #1013 Replaced the valve.` records completion and retains the note.
+Questions, quoted commands, negative or future completion, conflicting request
+numbers and lowercase commands cannot complete a repair. A tenant's plain thank-you closes the exchange without
 repeating an old appointment. Completion notices end with: "If anything else
 comes up let us know, thank you. Have a good day!"
 
@@ -369,3 +372,10 @@ phone routing. Sent, sending and uncertain attempts are consumed; a never-attemp
 queued notice can be safely updated or rerouted. The worker rechecks appointment,
 access, review scope and destination before sending. See
 [check-in verification](docs/VISIT_CHECKIN_RESULTS.md) for tested examples.
+
+The health endpoint reports `coordinatorEnabled`, `modelProvider`, `modelName` and
+`modelKeyConfigured`, without returning credentials. The interpreter logs bounded
+`agent_model_request` status events without message bodies or keys. Run
+`node scripts/verify-model.mjs` in the intended deployment environment to make a
+small real inference request through the same interpreter. It prints provider,
+model and HTTP success only. A missing or rejected key fails this explicit probe.

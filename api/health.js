@@ -15,6 +15,10 @@ export default function handler(req, res) {
     twilioNumberValid: Boolean(normalizePhoneNumber(process.env.TWILIO_NUMBER)),
     twilioAccountSidSet: Boolean(process.env.TWILIO_ACCOUNT_SID),
     propertyHqConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    coordinatorEnabled: process.env.COORDINATOR_ENABLED === 'true',
+    modelProvider: 'openai',
+    modelName: process.env.COORDINATOR_MODEL || 'gpt-4.1-mini',
+    modelKeyConfigured: Boolean(String(process.env.OPENAI_API_KEY || '').replace(/\s+/g,'')),
     agentPhoneWebhookConfigured: Boolean(process.env.AGENTPHONE_WEBHOOK_SECRET),
     inkboxWebhookConfigured: Boolean(process.env.INKBOX_WEBHOOK_SECRET)
   });

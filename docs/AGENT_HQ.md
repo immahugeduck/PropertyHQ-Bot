@@ -51,6 +51,11 @@ Maintenance reports progress or completion. An inspection-only visit returns to
 manager review before additional work. Optional additions and property policy
 decisions also require manager approval.
 
+Maintenance can include completed work details with an uppercase `DONE` clause,
+for example, “I got it with my little drain tool. I am finished. Thank you. DONE”.
+The original note remains in the audit record. Use `DONE #1001` when naming the
+repair explicitly. Negative, future, quoted or uncertain completion stays open.
+
 If saving fails, tell the sender the update could not be saved. Clarify missing
 identity, repair, permission or time instead of guessing.
 

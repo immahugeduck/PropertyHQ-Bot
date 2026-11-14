@@ -44,7 +44,7 @@ test('parseStaffCommand picks schedule, complete, or help', () => {
   assert.deepEqual(parseStaffCommand('hello?', NOW, TZ), { action: 'help', jobNumber: null });
 });
 
-for(const text of ['done','Done','done #1003','DONE 1003','DONE1003','done1003','DONE Replaced water heater elements.'])test('legacy staff completion variants cause no updates or relayed messages: '+text,async()=>{
+for(const text of ['done','Done','done #1003','DONE 1003','DONE1003','done1003','DONE after the replacement arrives.'])test('legacy staff completion variants cause no updates or relayed messages: '+text,async()=>{
  const backend=fakeBackend({pending:PENDING});const result=await staffText(text,backend);assert.equal(result.staffReply,'');assert.equal(decorateReply('ignored triage',result),'');assert.equal(twilioTexts(backend).length,0);assert.equal(backend.calls.some(c=>c.method==='PATCH'&&c.url.includes('/maintenance_requests')),false);
 });
 

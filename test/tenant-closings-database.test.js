@@ -16,7 +16,7 @@ test('a completed repair and the tenant thank-you both end warmly without reopen
 test('lowercase and malformed completion commands cannot change SQL status or queue alerts',async()=>{
  const f=await coordinatorFixture();try{
   const j=await intake(f);
-  for(const text of ['done','done #'+j.job_number,'DONE '+j.job_number,'DONE Replaced water heater elements.','FINISHED','DONE!']){
+  for(const text of ['done','done #'+j.job_number,'DONE '+j.job_number,'DONE after the replacement arrives.','FINISHED','DONE?']){
    const sid=await raw(f,text,j);assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'open',text);assert.equal((await f.outbox(sid)).length,0,text);
   }
   await raw(f,'DONE #'+j.job_number,j);assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'completed');
@@ -39,7 +39,7 @@ test('inspection completion follows the same uppercase exact-command rule',async
 test('malformed completion cannot mutate SQL state or notify through another action type',async()=>{
  const f=await coordinatorFixture();try{
   const j=await intake(f);
-  for(const type of ['report_progress','add_details','staff_event'])for(const text of ['done','DONE Replaced water heater elements.']){
+  for(const type of ['report_progress','add_details','staff_event'])for(const text of ['done','DONE after the replacement arrives.']){
    const ctx=await f.context(c.maintenance),sid='SMinvalidAlternate'+(++seq);
    await f.db.query('select public.coordinator_commit($1,$2,$3,$4,$5,$6::jsonb)',[c.user,c.maintenance,sid,ctx.version,text,JSON.stringify({reply:'This must be quiet',nextState:{pendingStaffEvent:{title:'Wrong mutation'}},actions:[{type,jobId:j.id,fields:{description:'Wrong update',eventTitle:'Wrong event',appointmentStart:'2035-01-02T15:00:00Z',appointmentEnd:'2035-01-02T16:00:00Z'}}]})]);
    assert.equal((await f.outbox(sid)).length,0);assert.equal((await f.context(c.tenantPhone)).jobs[0].status,'open');assert.deepEqual((await f.context(c.maintenance)).state,ctx.state);

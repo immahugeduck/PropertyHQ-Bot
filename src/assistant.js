@@ -99,13 +99,16 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
   if(internal) fallback=internal;
   // API keys contain no whitespace; tolerate copy/paste wrapping without changing storage.
   const apiKey=String(env.OPENAI_API_KEY || '').replace(/\s+/g,'');
-  if (!apiKey) return fallback;
+  const model=env.COORDINATOR_MODEL || 'gpt-4.1-mini';
+  const modelStatus=(status,httpStatus)=>console.info(JSON.stringify({type:'agent_model_request',provider:'openai',model,status,...(httpStatus?{httpStatus}:{})}));
+  if (!apiKey) {modelStatus('not_configured');return fallback;}
   const safe={identity:context.identity,state:context.state,staffFocus:staff?context.staffFocus:undefined,timezone:context.settings.timezone,open_time:context.settings.open_time,close_time:context.settings.close_time,staffEvents:staff?(context.staffEvents||[]):[],jobs:jobs.map(j=>({id:j.id,job_number:j.job_number,coordinator_details:j.coordinator_details,coordinator_category:j.coordinator_category,coordinator_review_status:j.coordinator_review_status,coordinator_manager_reply:!staff && (j.id===context.state?.activeJobId || jobs.length===1)?j.coordinator_manager_reply:undefined,title:j.title,description:j.description,notes:staff?j.notes:undefined,stage:j.stage,status:j.status,scheduled_at:j.scheduled_at,tenant_name:j.tenant_name,address:j.address,contact_phone:j.contact_phone,options:j.options,proposal_version:j.proposal_version})),messages:(context.messages||[]).slice(-12)};
   try {
     const res=await fetchImpl('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},signal:signal || AbortSignal.timeout(6000),body:JSON.stringify({model:env.COORDINATOR_MODEL || 'gpt-4.1-mini',max_completion_tokens:600,messages:[{role:'system',content:agentInstructions},{role:'user',content:JSON.stringify({now:new Date().toISOString(),context:safe,text:String(text).slice(0,4000)})}],response_format:{type:'json_schema',json_schema:{name:'maintenance_intent',strict:true,schema}}})});
-    if (!res.ok) return fallback;
+    if (!res.ok) {modelStatus('http_error',res.status);return fallback;}
     const data=await res.json();const intent=JSON.parse(data.choices?.[0]?.message?.content || '{}');
-    if (!TYPES.includes(intent.type) || !intent.fields || typeof intent.fields!=='object' || Array.isArray(intent.fields)) return fallback;
+    if (!TYPES.includes(intent.type) || !intent.fields || typeof intent.fields!=='object' || Array.isArray(intent.fields)) {modelStatus('invalid_output');return fallback;}
+    modelStatus('ok',res.status || 200);
     const reviewNote=managerInternalNote({context,text,intent});
     if(reviewNote) return reviewNote;
     // The schema also carries appointmentStart for tenant choices. Recover a
@@ -130,5 +133,5 @@ export async function interpretMessage({context,text,fetchImpl=globalThis.fetch,
     // When the model disagrees about the issue, ask rather than guess its scope.
     if(intent.type==='new_request' && context.identity.role==='tenant' && entryJob && isEntryPermissionQuestion(previous?.reply) && /\b(?:still|same|it['’]s|it is|that (?:issue|problem))\b/i.test(text) && !/\b(?:also|another|new|separate)\b/i.test(text)) return {type:'clarify_issue',jobId:entryJob.id,fields:{description:text,facts}};
     return intent;
-  } catch { return fallback; }
+  } catch { modelStatus('unavailable');return fallback; }
 }
