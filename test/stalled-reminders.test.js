@@ -89,6 +89,15 @@ test('booking a future visit cancels its old scheduling reminder',async()=>{
  }finally{await f.close();}
 });
 
+test('an emergency with a future exact dashboard visit does not send stalled emergency reminders',async()=>{
+ const f=await coordinatorFixture();try {
+  const job=await pending(f,{permit:true});
+  await f.db.query("update public.maintenance_requests set urgency='emergency',scheduled_at='2026-11-20T15:00:00Z' where id=$1",[job.id]);
+  const saved=(await f.db.query('select coordinator_waiting_reason from public.maintenance_requests where id=$1',[job.id])).rows[0];
+  assert.equal(saved.coordinator_waiting_reason,'scheduled');assert.equal(await enqueue(f),0);
+ }finally{await f.close();}
+});
+
 test('business-hour checks use the configured zone across overnight hours and the repeated DST hour',async()=>{
  const f=await coordinatorFixture();try {
   await f.db.exec("update public.triage_settings set timezone='America/New_York',open_days=ARRAY[1]::smallint[],open_time='22:00',close_time='02:00'");

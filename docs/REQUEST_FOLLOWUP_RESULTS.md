@@ -41,3 +41,17 @@ fictional service requests. No live test SMS was sent.
 
 Other-thread completion notes and model diagnostics are preserved. The published
 baseline for this change is bot `d49850b` and Property HQ `c5fee3a`.
+
+One fresh independent review found three Important issues: a draft typed while
+saving could be cleared, an emergency booked directly in Property HQ could still
+look stalled, and initial dashboard notes lacked activity metadata. Each was
+reproduced before its fix. The delayed-save Chromium example now preserves the
+new draft; initial notes record the authenticated manager and time; saved future
+emergency visits stay quiet. No review findings were deferred.
+
+Final verification: **513 bot tests and 31 Property HQ tests passed**, including
+the new notes/reminder examples and ownership checks. Bot syntax, touched-file
+lint, TypeScript and the local production webpack build passed. The local default
+Turbopack build cannot follow this worktree's shared node_modules symlink; the
+normal Git deployment uses its own installed dependencies. Current requests keep
+their existing statuses and begin a fresh waiting interval at rollout.

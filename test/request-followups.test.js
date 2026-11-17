@@ -50,6 +50,16 @@ test('management notes append independently, stay internal and enforce request o
  }finally{await f.close();}
 });
 
+test('initial authenticated dashboard notes receive an author and timestamp without duplicating earlier history',async()=>{
+ const f=await coordinatorFixture();try {
+  await owner(f);
+  const job=(await f.db.query("insert into public.maintenance_requests(user_id,property_id,tenant_id,title,description,category,urgency,status,source,notes) values($1,$2,$3,'New app repair','Washer repair reported through Property HQ.','general','medium','open','app','Supplier confirmed the replacement part.') returning id",[c.user,c.property,c.tenant])).rows[0];
+  const entries=(await f.db.query('select * from public.maintenance_request_activity where request_id=$1',[job.id])).rows;
+  assert.equal(entries.length,1);assert.equal(entries[0].author_role,'manager');assert.equal(entries[0].body,'Supplier confirmed the replacement part.');assert.ok(entries[0].created_at);
+  assert.equal((await saved(f,job.id)).coordinator_legacy_notes,null);
+ }finally{await f.close();}
+});
+
 test('manager replies remain optional until explicitly marked as needing a tenant response',async()=>{
  const f=await coordinatorFixture();try {
   await f.run(c.tenantPhone,'Can you install a garden spigot?');
@@ -115,5 +125,13 @@ test('settings validate ownership and bounds, and resuming restarts the request 
   const resumed=await saved(f,job.id);assert.equal(resumed.coordinator_reminders_paused,false);assert.notEqual(resumed.coordinator_waiting_token,before.coordinator_waiting_token);
   await f.db.query("select set_config('request.jwt.claim.sub','',false)");
   await assert.rejects(f.db.query('select public.maintenance_save_followup_settings(true,24)'),/owner/);
+ }finally{await f.close();}
+});
+
+test('a request without configured staff contacts waits on management rather than an unasked tenant',async()=>{
+ const f=await coordinatorFixture();try {
+  const {job}=await repair(f);await f.db.query('delete from public.triage_settings where user_id=$1',[c.user]);
+  await f.db.query('select public.coordinator_refresh_waiting($1,$2)',[c.user,job.id]);
+  const m=await saved(f,job.id);assert.equal(m.coordinator_waiting_on,'manager');assert.equal(m.coordinator_waiting_reason,'staff_setup');
  }finally{await f.close();}
 });
