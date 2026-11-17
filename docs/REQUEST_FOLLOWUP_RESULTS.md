@@ -61,3 +61,11 @@ Production applied the source migration as
 have RLS enabled, internal worker helpers remain service-only, and management
 RPCs enforce signed-in ownership. Verification found no historical reminder
 backlog queued and preserved the existing request statuses.
+
+Release completed November 17: both repositories were pushed to `main`; the
+functional bot release `289defb` and Property HQ release `98c37f2` reached READY
+and their public health/page checks returned HTTP 200. Deployment-scoped
+error/fatal scans were clean. The existing minute runner remained enabled and
+reported a successful run at 02:33 UTC after the migration. Subsequent completion
+documentation does not change the tested runtime. Ready for the next controlled
+live tenant/maintenance walkthrough.
