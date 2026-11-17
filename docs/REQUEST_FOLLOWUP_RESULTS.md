@@ -55,3 +55,9 @@ lint, TypeScript and the local production webpack build passed. The local defaul
 Turbopack build cannot follow this worktree's shared node_modules symlink; the
 normal Git deployment uses its own installed dependencies. Current requests keep
 their existing statuses and begin a fresh waiting interval at rollout.
+
+Production applied the source migration as
+`20261117022605_request_notes_followups` on November 17. The owner-scoped tables
+have RLS enabled, internal worker helpers remain service-only, and management
+RPCs enforce signed-in ownership. Verification found no historical reminder
+backlog queued and preserved the existing request statuses.
