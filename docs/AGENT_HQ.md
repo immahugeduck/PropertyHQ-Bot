@@ -46,6 +46,14 @@ Use the recorded time zone and confirm the resolved appointment time.
 
 ## Completion and handoff
 
+Property HQ request cards show the person whose next response is needed. The
+request detail page keeps dated notes and activity with the author's role.
+Management notes saved there are internal and do not send messages. Stalled
+required responses receive at most two reminders, using the configured interval
+(24 hours by default) and working hours. A reply or changed action invalidates
+the old reminder. Management can pause a request while waiting for a part.
+Optional manager offers stay quiet unless management marks Tenant response needed.
+
 At a confirmed visit time the worker can send maintenance a brief check-in.
 Maintenance reports progress or completion. An inspection-only visit returns to
 manager review before additional work. Optional additions and property policy

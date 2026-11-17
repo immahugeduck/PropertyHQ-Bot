@@ -352,6 +352,12 @@ Apply additive migration `20261112235510_maintenance_dispatch_gate.sql` after th
 
 ## Scheduled maintenance check-ins
 
+For internal request history, a shared waiting-on indicator and capped reminders,
+apply `20261116233357_request_notes_followups.sql` in PropertyHQ before the UI
+release. See [notes and follow-up behavior](docs/REQUEST_FOLLOWUP_RESULTS.md).
+The existing minute runner handles stalled responses during working hours;
+Settings controls the waiting interval and request details can pause reminders.
+
 Apply `20261113032510_visit_status_checkins.sql` before this version. The existing
 enabled minute delivery runner discovers confirmed visits as they begin and sends
 one check-in asking maintenance to reply `DONE` or `DONE #<request number>` when finished.

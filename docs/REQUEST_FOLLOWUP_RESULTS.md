@@ -1,0 +1,43 @@
+# Request notes, next action and stalled follow-ups
+
+This update adds an internal, dated activity history to Property HQ maintenance
+requests. Each applied bot action preserves the author and current message; manual
+management notes append through an owner-checked RPC and never send a text.
+Earlier notes remain available. Editing request details omits the old shared notes
+field, preserving notes added while the form was open.
+
+The request list and details show who needs to act next and why. The same saved
+waiting token controls follow-ups, so a permission answer, changed visit, completed
+request or new manager decision invalidates the old queued reminder. Questions,
+thanks and internal notes do not reset a pending response's clock.
+
+Default reminder interval: **24 hours**, adjustable from 1 to 168 in
+Settings → Maintenance follow-ups. Use the existing account's working days,
+opening/closing hours and time zone. A request can pause/resume reminders. A
+second reminder waits a full interval after the first attempt has finished;
+there are at most two per pending action, including after a long weekend.
+
+Manager SEND replies are optional by default. In the request details, management
+can mark **Tenant response needed** for an answer that requires follow-up. Optional
+quotes and declined installations are not automatically chased. Confirmed future
+visits use the existing visit check-in; stalled completion updates become eligible
+only after the visit begins and the waiting interval expires.
+
+The additive migration is `20261116233357_request_notes_followups.sql`. Apply it
+before the UI release. Existing requests start their interval at rollout: no old
+reminder backlog is sent. The same authenticated minute worker discovers and
+validates these messages. Internal helpers remain service-only; activity is
+management-only and account-scoped. No extra messaging provider or scheduler.
+
+Fictional real-SQL/runtime examples cover author attribution, internal notes,
+owner/RLS checks, repeated SIDs, separate requests, optional offers, attended access,
+progress vs status questions, thresholds, quiet hours, caps, invalidation, paused
+requests, changed contacts, uncertainty and the existing claim worker. The first
+full run passed **508 bot tests and 30 Property HQ tests**, before the final review.
+TypeScript and touched-file lint passed. The actual components were rendered in
+headless Chromium at desktop and mobile widths; note saving, pause/settings
+controls and preservation of notes on edit were exercised with intercepted
+fictional service requests. No live test SMS was sent.
+
+Other-thread completion notes and model diagnostics are preserved. The published
+baseline for this change is bot `d49850b` and Property HQ `c5fee3a`.
